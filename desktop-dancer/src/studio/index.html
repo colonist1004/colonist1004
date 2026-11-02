@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src blob:"
+    />
+    <title>춤 만들기 — Desktop Dancer</title>
+    <link rel="stylesheet" href="studio.css" />
+  </head>
+  <body>
+    <header>
+      <h1>춤 만들기</h1>
+      <p class="sub">춤 영상을 넣으면 캐릭터가 따라 출 수 있는 모션으로 바꿔 줍니다.</p>
+    </header>
+
+    <!-- one-time setup -->
+    <section id="setup" class="card" hidden>
+      <h2>처음 한 번만: 준비하기</h2>
+      <div id="setup-nopython" hidden>
+        <p>
+          춤 인식에는 <b>Python</b>이 필요한데, 이 PC에서 찾지 못했습니다.<br />
+          아래 버튼으로 Python 3.12를 설치하세요. 설치 첫 화면에서
+          <b>“Add python.exe to PATH”</b>를 꼭 체크하세요. 설치가 끝나면 <b>다시 확인</b>을 누르세요.
+        </p>
+        <div class="row">
+          <button id="btn-get-python" class="primary">Python 내려받기 페이지 열기</button>
+          <button id="btn-recheck">다시 확인</button>
+        </div>
+      </div>
+      <div id="setup-ready" hidden>
+        <p>
+          <span id="setup-python"></span> 을(를) 찾았습니다. 춤 인식 도구(MediaPipe 등)를 설치합니다.
+          수백 MB를 내려받기 때문에 몇 분 걸릴 수 있습니다.
+        </p>
+        <div class="row"><button id="btn-setup" class="primary">설치 시작</button></div>
+      </div>
+      <pre id="setup-log" class="log" hidden></pre>
+    </section>
+
+    <main id="main" hidden>
+      <!-- 1. video -->
+      <section class="card">
+        <h2><span class="step">1</span> 영상 고르기</h2>
+        <label id="drop" class="drop" tabindex="0">
+          <input id="file" type="file" accept="video/*" hidden />
+          <span class="drop-big">영상을 여기로 끌어 놓거나 클릭해서 선택</span>
+          <span class="drop-small">mp4, mov, webm 등 · 전신이 보이고 카메라가 고정된 영상이 잘 됩니다</span>
+        </label>
+        <div class="row url-row">
+          <input id="url" type="url" placeholder="또는 영상 주소(URL) 붙여넣기" />
+          <button id="btn-url">불러오기</button>
+        </div>
+        <p class="hint">URL은 본인에게 권리가 있는 영상에만 사용하세요 (유튜브 약관 주의).</p>
+
+        <div id="video-box" hidden>
+          <video id="video" controls preload="metadata"></video>
+          <div class="range">
+            <div id="range-bar" class="range-bar"><div id="range-sel" class="range-sel"></div><div id="range-head" class="range-head"></div></div>
+            <div class="row range-row">
+              <div class="time-field">
+                <label for="start">시작</label>
+                <input id="start" type="text" value="0:00.0" />
+                <button id="btn-set-start" title="지금 재생 위치를 시작으로">지금 위치로</button>
+              </div>
+              <div class="time-field">
+                <label for="end">끝</label>
+                <input id="end" type="text" value="0:00.0" />
+                <button id="btn-set-end" title="지금 재생 위치를 끝으로">지금 위치로</button>
+              </div>
+              <button id="btn-play-range">▶ 구간 재생</button>
+            </div>
+            <p class="hint" id="range-info"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. options -->
+      <section class="card">
+        <h2><span class="step">2</span> 설정</h2>
+        <div class="grid">
+          <label for="name">이름</label>
+          <input id="name" type="text" placeholder="내 춤" />
+
+          <span>반복 재생</span>
+          <label class="check"><input id="loop" type="checkbox" checked /> 끝과 시작을 자연스럽게 이어서 계속 반복</label>
+
+          <span>움직임</span>
+          <div class="seg" id="root">
+            <button data-v="planted" class="on">조금씩 이동</button>
+            <button data-v="inplace">제자리</button>
+          </div>
+
+          <span>부드럽게</span>
+          <div class="slider">
+            <input id="smooth" type="range" min="0" max="2" step="0.25" value="1" />
+            <span id="smooth-label">보통</span>
+          </div>
+
+          <span>정확도</span>
+          <div class="seg" id="model">
+            <button data-v="lite">빠르게</button>
+            <button data-v="full">보통</button>
+            <button data-v="heavy" class="on">정확하게</button>
+          </div>
+
+          <span>거울 영상</span>
+          <label class="check"><input id="mirror" type="checkbox" /> 좌우 반전 (거울 모드 안무 영상일 때)</label>
+
+          <label for="person">여러 명일 때</label>
+          <select id="person">
+            <option value="">가장 크게 보이는 사람</option>
+            <option value="0">왼쪽에서 1번째</option>
+            <option value="1">왼쪽에서 2번째</option>
+            <option value="2">왼쪽에서 3번째</option>
+            <option value="3">왼쪽에서 4번째</option>
+          </select>
+        </div>
+
+        <details class="adv">
+          <summary>고급: 클라우드 GPU(GVHMR) 결과 사용</summary>
+          <p class="hint">
+            NVIDIA GPU 클라우드에서 <code>pipeline/cloud/run_gvhmr.sh</code>로 만든 <code>.npz</code>(또는
+            <code>hmr4d_results.pt</code>)를 고르면 그 결과로 만듭니다. 점프와 이동까지 살아납니다. GVHMR은 비상업
+            용도로만 쓸 수 있습니다.
+          </p>
+          <div class="row">
+            <button id="btn-gvhmr">결과 파일 선택…</button>
+            <span id="gvhmr-file" class="muted">선택 안 함 (내 PC에서 인식)</span>
+            <button id="btn-gvhmr-clear" class="link" hidden>지우기</button>
+          </div>
+          <label class="check" id="orig-row" hidden><input id="root-original" type="checkbox" /> 원본 이동 그대로 (범위 ±25cm)</label>
+        </details>
+      </section>
+
+      <!-- 3. run -->
+      <section class="card">
+        <h2><span class="step">3</span> 만들기</h2>
+        <div class="row">
+          <button id="btn-run" class="primary big" disabled>춤 만들기</button>
+          <button id="btn-cancel" hidden>취소</button>
+        </div>
+        <div id="progress" hidden>
+          <div class="bar"><div id="bar-fill"></div></div>
+          <p id="progress-text" class="muted"></p>
+        </div>
+        <div id="result" class="result" hidden>
+          <p id="result-text"></p>
+          <div class="row">
+            <button id="btn-apply" class="primary">지금 춤추게 하기</button>
+            <button id="btn-folder">모션 폴더 열기</button>
+          </div>
+        </div>
+        <div id="error" class="error" hidden></div>
+        <details class="adv" id="log-box">
+          <summary>자세한 로그</summary>
+          <pre id="log" class="log"></pre>
+        </details>
+      </section>
+    </main>
+
+    <script src="studio.js"></script>
+  </body>
+</html>

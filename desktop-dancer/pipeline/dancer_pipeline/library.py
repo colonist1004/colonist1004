@@ -7,7 +7,10 @@ from pathlib import Path
 
 
 def app_data_dir() -> Path:
-    """Same folder as Electron's app.getPath('userData') for the app named "desktop-dancer"."""
+    """Same folder as Electron's app.getPath('userData') for the app named "desktop-dancer".
+    The app passes its exact folder in DANCER_DATA_DIR when it runs the pipeline."""
+    if os.environ.get("DANCER_DATA_DIR"):
+        return Path(os.environ["DANCER_DATA_DIR"])
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     elif sys.platform == "darwin":

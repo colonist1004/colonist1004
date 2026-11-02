@@ -27,21 +27,21 @@ GitHub 저장소 **Actions → Build Desktop Dancer (Windows)** 에서 최근 �
 
 ## 내 춤 영상으로 모션 만들기
 
-[`pipeline/README.md`](pipeline/README.md) 를 참고하세요. 간단히 정리하면 아래와 같습니다.
+트레이 아이콘을 우클릭하고 **춤 만들기 (영상에서)…** 를 누르세요.
 
-```bash
-cd pipeline
-```
+1. **처음 한 번만 준비**
+   - **설치 시작**을 누르면 춤 인식 도구를 자동으로 설치합니다. 몇 분 걸립니다.
+   - PC에 Python이 없으면 안내가 나옵니다. [python.org](https://www.python.org/downloads/windows/)에서 Python 3.12를 설치하세요. 설치 첫 화면에서 **"Add python.exe to PATH"**를 꼭 체크해야 합니다.
+2. **영상 고르기**
+   - 영상을 끌어다 놓거나 클릭해서 선택합니다. 주소(URL)를 붙여넣어도 됩니다.
+   - 재생하면서 **지금 위치로** 버튼으로 시작과 끝을 정합니다.
+3. **설정**
+   - 반복 재생, 움직임(조금씩 이동/제자리), 부드럽게, 정확도, 거울 영상, 여러 명일 때 대상 사람을 고릅니다.
+4. **춤 만들기**
+   - 진행률이 표시되고, 중간에 취소할 수 있습니다.
+   - 끝나면 **지금 춤추게 하기**를 눌러 바로 적용합니다.
 
-```bash
-pip install -r requirements.txt
-```
-
-```bash
-python extract_dance.py 춤영상.mp4 --start 10 --end 30 --loop
-```
-
-만든 모션은 앱의 트레이 메뉴 **춤**에 자동으로 나타납니다.
+만든 모션은 트레이 메뉴 **춤**에도 자동으로 추가됩니다. 명령줄로 쓰고 싶다면 [`pipeline/README.md`](pipeline/README.md)를 참고하세요.
 
 ## 기본 포함 에셋
 
@@ -81,6 +81,8 @@ node scripts/check-assets.mjs path/to/character.vrm path/to/motion.vrma
 - `src/main.js`: 투명 창, 트레이 메뉴, 라이브러리, 드래그, 화면 변화 감지
 - `src/placement.js`: 작업표시줄 감지와 창 위치 계산 (순수 함수)
 - `src/settings.js`: 설정 저장
+- `src/studio/`, `src/studio-preload.js`: "춤 만들기" 창
+- `src/pipeline-runner.js`: Python 가상환경 자동 설치, 파이프라인 실행과 진행률 전달
 - `src/preload.js`: 렌더러에 노출하는 IPC API
 - `src/renderer/`: three.js + three-vrm 렌더링, 픽셀 알파로 클릭 통과 판정, FPS 제한
 - `scripts/vendor.mjs`: 렌더러가 쓰는 라이브러리를 `src/renderer/vendor/`로 복사 (`npm start`·`npm run dist` 때 자동 실행)

@@ -12,7 +12,7 @@ def is_url(s: str) -> bool:
     return bool(re.match(r"^https?://", s))
 
 
-def download(url: str, log=print) -> Path:
+def download(url: str, log=print, on_progress=None) -> Path:
     """Download a video URL with yt-dlp into the cache (reused on later runs).
     Only for videos you are allowed to download; YouTube's terms restrict downloading."""
     try:
@@ -34,6 +34,12 @@ def download(url: str, log=print) -> Path:
         "noprogress": True,
         "noplaylist": True,
     }
+    if on_progress:
+        def hook(d):
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            if d.get("status") == "downloading" and total:
+                on_progress(d.get("downloaded_bytes", 0) / total)
+        opts["progress_hooks"] = [hook]
     log(f"downloading {url} ...")
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -51,7 +57,7 @@ def download(url: str, log=print) -> Path:
 
 def read_frames(path, start=None, end=None, target_fps=30.0):
     """Yields (time_seconds, rgb_frame) between start and end, resampled to at most target_fps.
-    Also returns the effective fps through the generator's first value: ('fps', fps)."""
+    The first value is ('info', {'fps': effective fps, 'total': expected number of frames})."""
     import cv2
 
     cap = cv2.VideoCapture(str(path))
@@ -59,7 +65,10 @@ def read_frames(path, start=None, end=None, target_fps=30.0):
         raise SystemExit(f"영상을 열 수 없습니다: {path}")
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     step = max(1, round(src_fps / target_fps)) if target_fps else 1
-    yield "fps", src_fps / step
+    count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+    first = (start or 0) * src_fps
+    last = min(count, end * src_fps) if end is not None and count else (end * src_fps if end is not None else count)
+    yield "info", {"fps": src_fps / step, "total": max(1, int((last - first) / step))}
     if start:
         cap.set(cv2.CAP_PROP_POS_MSEC, start * 1000)
     i = 0

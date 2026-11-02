@@ -32,6 +32,21 @@
       {
         "from": "assets",
         "to": "assets"
+      },
+      {
+        "from": "pipeline",
+        "to": "pipeline",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!tests/**",
+          "!.venv/**"
+        ]
+      },
+      {
+        "from": "shared",
+        "to": "shared"
       }
     ],
     "win": {

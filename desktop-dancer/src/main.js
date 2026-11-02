@@ -6,12 +6,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const settings = require('./settings');
 const placement = require('./placement');
+const runner = require('./pipeline-runner');
+
+// Keep one data folder name in dev and packaged builds (the packaged app would otherwise use the
+// productName "Desktop Dancer"). The Python pipeline writes motions into this same folder.
+if (!process.env.DANCER_USER_DATA) app.setPath('userData', path.join(app.getPath('appData'), 'desktop-dancer'));
 
 const SAMPLE_VRM_URL =
   'https://raw.githubusercontent.com/vrm-c/vrm-specification/master/samples/Seed-san/vrm/Seed-san.vrm';
 
 let win = null;
 let tray = null;
+let studio = null;
 
 // ----------------------------------------------------------------- library
 
@@ -232,6 +238,7 @@ function rebuildTrayMenu() {
   const primaryId = screen.getPrimaryDisplay().id;
   const menu = Menu.buildFromTemplate([
     { label: s.visible ? '숨기기' : '보이기', click: () => setVisible(!s.visible) },
+    { label: '춤 만들기 (영상에서)…', click: openStudio },
     { type: 'separator' },
     {
       label: '캐릭터',
@@ -399,6 +406,110 @@ ipcMain.on('renderer-error', (_e, msg) => {
   console.error('[renderer]', msg);
 });
 
+
+// ------------------------------------------------------------ 춤 만들기 window
+
+function openStudio() {
+  if (studio) {
+    studio.show();
+    studio.focus();
+    return;
+  }
+  studio = new BrowserWindow({
+    width: 760,
+    height: 900,
+    minWidth: 560,
+    minHeight: 500,
+    title: '춤 만들기 — Desktop Dancer',
+    autoHideMenuBar: true,
+    backgroundColor: '#f4f5f8',
+    webPreferences: {
+      preload: path.join(__dirname, 'studio-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  studio.loadFile(path.join(__dirname, 'studio', 'index.html'));
+  // Links never open inside the app.
+  studio.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  studio.webContents.on('will-navigate', (e) => e.preventDefault());
+  if (process.env.DANCER_SELFTEST) {
+    studio.webContents.on('console-message', (_e, level, message) => console.log(`[studio:${level}] ${message}`));
+  }
+  studio.on('closed', () => {
+    runner.cancel();
+    studio = null;
+  });
+}
+
+const sendStudio = (channel, v) => studio && !studio.isDestroyed() && studio.webContents.send(channel, v);
+
+ipcMain.handle('studio:status', () => runner.status());
+
+ipcMain.handle('studio:setup', async () => {
+  try {
+    await runner.setup((line) => sendStudio('studio:setup-log', line));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('studio:open-python', () => shell.openExternal('https://www.python.org/downloads/windows/'));
+
+ipcMain.handle('studio:download', (_e, url) => {
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return { type: 'error', msg: '주소가 올바르지 않습니다' };
+  try {
+    return runner.runJob([url, '--download-only'], (ev) => sendStudio('studio:job', ev));
+  } catch (e) {
+    return { type: 'error', msg: e.message };
+  }
+});
+
+ipcMain.handle('studio:read-video', (_e, file) => {
+  // Only downloads made by the pipeline (its cache folder) can be read back for preview.
+  const resolved = path.resolve(String(file));
+  if (!resolved.startsWith(path.resolve(runner.cacheDir()) + path.sep)) throw new Error('not a pipeline download');
+  const buf = fs.readFileSync(resolved);
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+});
+
+ipcMain.handle('studio:pick-gvhmr', async () => {
+  const r = await dialog.showOpenDialog(studio, {
+    title: 'GVHMR 결과 파일',
+    properties: ['openFile'],
+    filters: [{ name: 'GVHMR 결과', extensions: ['npz', 'pt'] }],
+  });
+  return r.canceled ? null : r.filePaths[0];
+});
+
+ipcMain.handle('studio:run', (_e, opts) => {
+  try {
+    ensureUserLibrary();
+    const args = runner.buildArgs(opts || {}, path.join(userLibrary(), 'motions'));
+    return runner.runJob(args, (ev) => sendStudio('studio:job', ev));
+  } catch (e) {
+    return { type: 'error', msg: e.message };
+  }
+});
+
+ipcMain.handle('studio:cancel', () => runner.cancel());
+
+ipcMain.handle('studio:apply', (_e, file) => {
+  if (typeof file !== 'string' || !isLibraryFile(file)) return false;
+  settings.update({ motion: file });
+  sendLoad();
+  rebuildTrayMenu();
+  if (!settings.get().visible) setVisible(true);
+  return true;
+});
+
+ipcMain.handle('studio:open-folder', () => {
+  ensureUserLibrary();
+  shell.openPath(path.join(userLibrary(), 'motions'));
+});
+
 // --------------------------------------------------------------- lifecycle
 
 if (!app.requestSingleInstanceLock()) {
@@ -421,6 +532,7 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   app.whenReady().then(() => {
+    runner.init(app);
     settings.load(app.getPath('userData'));
     ensureUserLibrary();
     watchLibrary();
@@ -444,6 +556,8 @@ if (!app.requestSingleInstanceLock()) {
       if (win && win.isVisible()) win.setAlwaysOnTop(true, 'screen-saver');
     }, 5000);
   });
+
+  if (process.env.DANCER_OPEN_STUDIO) app.whenReady().then(() => setTimeout(openStudio, 300));
 
   app.on('window-all-closed', () => {
     // Keep running in the tray.

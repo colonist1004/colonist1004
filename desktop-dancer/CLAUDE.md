@@ -16,6 +16,12 @@ This folder is separate from the photo editor at the repo root and has its own `
 - `shared/skeleton.json` is the single reference skeleton. It is used by the JS sample generator and the Python pipeline. VRMA rest rotations are identity.
 - Coordinates follow VRM 1.0: +Y up, the body faces +Z, character left = +X.
 
+## Studio ("춤 만들기" window)
+- `src/studio/` is the UI. `src/pipeline-runner.js` builds the venv in `userData/pipeline-env` from a system Python 3.9-3.13, then runs `extract_dance.py --progress-json`. The `@@{json}` lines carry progress, done, and error events.
+- The renderer never passes raw CLI arguments. `buildArgs()` validates the option object.
+- `DANCER_PYTHON=<python>` skips the setup. `DANCER_OPEN_STUDIO=1` opens the window at launch. E2E tests drive the window with Playwright `_electron`.
+- userData is pinned to `appData/desktop-dancer` in both dev and packaged builds. The pipeline gets it through `DANCER_DATA_DIR`.
+
 ## Layout
 - `src/main.js`: window, tray, library, IPC. `src/placement.js`: pure placement math.
 - `src/renderer/`: rendering, hit-testing (pixel alpha → `setIgnoreMouseEvents`), FPS cap.

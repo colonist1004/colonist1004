@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dancer_pipeline import post  # noqa: E402
 from dancer_pipeline.library import motions_dir  # noqa: E402
+from dancer_pipeline.progress import Progress  # noqa: E402
 from dancer_pipeline.retarget import keypoints_to_rotations  # noqa: E402
 from dancer_pipeline.skeleton import BONES  # noqa: E402
 from dancer_pipeline.vrma import write_vrma  # noqa: E402
@@ -28,8 +29,11 @@ from dancer_pipeline.vrma import write_vrma  # noqa: E402
 MIRROR = np.diag([-1.0, 1.0, 1.0])
 
 
-def log(*a, **k):
-    print(*a, **k, flush=True)
+progress = Progress()
+
+
+def log(msg="", end="\n"):
+    progress.log(msg, end=end)
 
 
 def swap_side(name: str) -> str:
@@ -69,6 +73,8 @@ def parse_args(argv=None):
     p.add_argument("--hands", type=float, default=0.7, help="손목 회전 반영 비율 (0~1, 기본 0.7)")
     p.add_argument("--no-foot-lock", action="store_true", help="발 고정(IK) 끄기")
     p.add_argument("--no-lift", action="store_true", help="2D+뼈 길이 보정 끄기 (MediaPipe 3D 좌표만 사용)")
+    p.add_argument("--progress-json", action="store_true", help="진행 상황을 JSON 줄로 출력 (앱용)")
+    p.add_argument("--download-only", action="store_true", help="URL을 내려받기만 하고 경로를 알려줌 (앱 미리보기용)")
     p.add_argument("--save-keypoints", action="store_true", help="디버그용 키포인트 npz도 저장")
     return p.parse_args(argv)
 
@@ -79,16 +85,23 @@ def run_mediapipe(args, video):
     from dancer_pipeline.video import read_frames
 
     frames = read_frames(video, args.start, args.end, args.fps)
-    _, fps = next(frames)
-    log(f"pose estimation (MediaPipe {args.model}, {fps:.1f} fps) ...")
-    kp, kp2d, valid = estimate(frames, fps, variant=args.model, person=args.person, log=log)
+    _, info = next(frames)
+    fps, total = info["fps"], info["total"]
+    progress.stage("model", 0, "MediaPipe 모델 준비")
+    from dancer_pipeline.pose_mediapipe import model_path
+
+    model_path(args.model, log)
+    progress.stage("pose", 0, f"동작 인식 중 ({total} 프레임)")
+    kp, kp2d, valid = estimate(frames, fps, variant=args.model, person=args.person, log=log,
+                               on_frame=lambda i: progress.stage("pose", i / total))
     n = len(valid)
     if n < 2:
         raise SystemExit("처리할 프레임이 없습니다 (시간 범위를 확인하세요)")
     ratio = valid.mean()
     log(f"frames: {n}, person found in {ratio * 100:.0f}%")
+    progress.stage("post", 0, "다듬는 중 (떨림 제거, 발 고정)")
     if ratio < 0.5:
-        raise SystemExit("사람이 감지된 프레임이 50% 미만입니다. 전신이 보이는 구간을 지정하거나 --person 을 확인하세요.")
+        raise SystemExit("사람이 감지된 프레임이 50% 미만입니다. 전신이 잘 보이는 구간을 고르거나, 여러 명이 나오면 대상 사람(--person) 설정을 확인하세요.")
     kp = {k: post.fill_gaps(v, valid) for k, v in kp.items()}
     kp2d = {k: post.fill_gaps(v, valid) for k, v in kp2d.items()}
     raw = {**{f"w_{k}": v for k, v in kp.items()}, **{f"i_{k}": v for k, v in kp2d.items()}, "fps": fps}
@@ -155,10 +168,34 @@ def run_gvhmr(args):
 
 def main(argv=None):
     args = parse_args(argv)
+    global progress
+    progress = Progress(json_mode=args.progress_json)
+    try:
+        return _main(args)
+    except SystemExit as e:
+        if args.progress_json and e.code not in (0, None) and not isinstance(e.code, int):
+            progress.error(str(e.code))
+            raise SystemExit(1) from None
+        raise
+    except Exception as e:  # unexpected: report, then fail
+        if args.progress_json:
+            progress.error(f"{type(e).__name__}: {e}")
+            raise SystemExit(1) from None
+        raise
+
+
+def _main(args):
     from dancer_pipeline.video import download, is_url
 
     source = args.input
-    video = download(source, log=log) if is_url(source) else Path(source)
+    if is_url(source):
+        progress.stage("download", 0, "영상 내려받는 중")
+        video = download(source, log=log, on_progress=lambda f: progress.stage("download", f))
+    else:
+        video = Path(source)
+    if args.download_only:
+        progress.done(video=str(video))
+        return video
     if args.engine == "mediapipe" and not video.exists():
         raise SystemExit(f"파일이 없습니다: {video}")
 
@@ -179,6 +216,7 @@ def main(argv=None):
     else:
         out.parent.mkdir(parents=True, exist_ok=True)
 
+    progress.stage("save", 0, "저장 중")
     local = {b: m for b, m in local.items() if b in BONES}
     write_vrma(out, fps, local, root, name=name)
     n = len(root)
@@ -199,6 +237,7 @@ def main(argv=None):
     if "keypoints" in extra:
         np.savez_compressed(out.with_suffix(".keypoints.npz"), **extra["keypoints"])
     log(f"saved {out}  ({meta['duration']:.1f}s, {n} frames)")
+    progress.done(out=str(out), duration=meta["duration"], frames=n, detected=meta.get("detected_ratio"))
     return out
 
 

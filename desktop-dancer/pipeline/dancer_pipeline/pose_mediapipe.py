@@ -24,6 +24,7 @@ MP_TO_VRM = np.diag([1.0, -1.0, -1.0])
 
 
 def model_path(variant: str, log=print):
+    """Downloads the model into the cache on first use."""
     path = cache_dir() / "models" / f"pose_landmarker_{variant}.task"
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +43,7 @@ def _center_and_size(lms):
     return hip, np.linalg.norm(sh - hip)
 
 
-def estimate(frames, fps, variant="heavy", person=None, max_people=4, min_visibility=0.3, log=print):
+def estimate(frames, fps, variant="heavy", person=None, max_people=4, min_visibility=0.3, log=print, on_frame=None):
     """frames: iterable of (t, rgb). person: None = largest person, or an index counted left to right
     in the first frame where people are found. Returns (world keypoints name->(F,3), image keypoints
     name->(F,2) in pixels with +y up, valid (F,))."""
@@ -95,9 +96,8 @@ def estimate(frames, fps, variant="heavy", person=None, max_people=4, min_visibi
                 image.append(img)
                 # core joints must be seen; hands/feet can be filled from neighbors
                 valid.append(bool(np.all(vis[[11, 12, 23, 24]] > min_visibility)))
-            if i % 30 == 0:
-                log(f"  pose {i} frames ({t:.1f}s)", end="\r")
-    log("")
+            if on_frame and i % 5 == 0:
+                on_frame(i)
     world, image = np.array(world), np.array(image)
     kp = {name: world[:, k] for k, name in enumerate(MP_NAMES)}
     kp2d = {name: image[:, k] for k, name in enumerate(MP_NAMES)}
