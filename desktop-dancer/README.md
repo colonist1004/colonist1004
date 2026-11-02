@@ -2,7 +2,7 @@
 
 Windows 작업표시줄 위에서 3D 캐릭터(VRM)가 춤(VRMA)을 추는 데스크탑 앱입니다.
 현재 단계는 **Part C MVP**입니다. 샘플 캐릭터와 샘플 춤이 작업표시줄 위에서 반복 재생됩니다.
-영상에서 춤을 추출하는 Part B(`pipeline/`)도 들어 있습니다. 이미지로 캐릭터를 만드는 Part A는 다음 마일스톤입니다. 자세한 내용은 [docs/spec.md](docs/spec.md)를 참고하세요.
+영상에서 춤을 추출하는 Part B와 그림 한 장으로 캐릭터를 만드는 Part A(`pipeline/`)도 들어 있습니다. 자세한 내용은 [docs/spec.md](docs/spec.md)를 참고하세요.
 
 ## 받기 (Windows)
 
@@ -42,6 +42,23 @@ GitHub 저장소 **Actions → Build Desktop Dancer (Windows)** 에서 최근 �
    - 끝나면 **지금 춤추게 하기**를 눌러 바로 적용합니다.
 
 만든 모션은 트레이 메뉴 **춤**에도 자동으로 추가됩니다. 명령줄로 쓰고 싶다면 [`pipeline/README.md`](pipeline/README.md)를 참고하세요.
+
+## 내 그림으로 캐릭터 만들기
+
+트레이 메뉴에서 **캐릭터 만들기 (그림에서)…** 를 누르세요.
+
+1. **그림 고르기**: 그림을 넣으면 전신, 정면, T/A 포즈인지 자동으로 확인해 줍니다.
+2. **클라우드에서 만들기**
+   - 3D 생성과 리깅은 NVIDIA GPU가 필요해서 클라우드(RunPod 등)에서 실행합니다.
+   - 창에 나오는 순서대로 폴더와 그림을 올리고, 명령 한 줄을 복사해서 실행합니다.
+3. **결과 가져오기**
+   - 내려받은 `.vrm` 이나 `.rigged.glb` 를 끌어 놓습니다.
+   - `.glb` 는 키와 그림체(애니풍/부드럽게)를 고른 뒤 VRM으로 변환합니다.
+4. **확인하고 적용**
+   - 돌아가는 3D 미리보기와 **춤 미리보기**로 확인합니다.
+   - 뒤돌아 있으면 **앞뒤가 반대예요**, 괜찮으면 **이 캐릭터로 바꾸기**를 누릅니다.
+
+다른 곳에서 구한 VRM 파일도 3번에서 바로 넣을 수 있습니다. 자세한 내용은 [`pipeline/README.md`](pipeline/README.md)를 참고하세요.
 
 ## 기본 포함 에셋
 
@@ -83,6 +100,8 @@ node scripts/check-assets.mjs path/to/character.vrm path/to/motion.vrma
 - `src/settings.js`: 설정 저장
 - `src/studio/`, `src/studio-preload.js`: "춤 만들기" 창
 - `src/pipeline-runner.js`: Python 가상환경 자동 설치, 파이프라인 실행과 진행률 전달
+- `src/charstudio/`, `src/charstudio-preload.js`: "캐릭터 만들기" 창 (그림 확인, 클라우드 안내, 변환, 3D 미리보기)
+- `scripts/preview/`: 모델을 앞·옆·뒤에서 렌더링하는 개발용 미리보기 (Playwright)
 - `src/preload.js`: 렌더러에 노출하는 IPC API
 - `src/renderer/`: three.js + three-vrm 렌더링, 픽셀 알파로 클릭 통과 판정, FPS 제한
 - `scripts/vendor.mjs`: 렌더러가 쓰는 라이브러리를 `src/renderer/vendor/`로 복사 (`npm start`·`npm run dist` 때 자동 실행)

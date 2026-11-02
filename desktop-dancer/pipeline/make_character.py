@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Rigged character (GLB, e.g. TRELLIS + UniRig output) -> VRM 1.0 avatar for Desktop Dancer.
+
+  python make_character.py rigged.glb --name 내캐릭터
+  python make_character.py rigged.glb --flip            # if it ends up facing backwards
+
+Steps: find humanoid bones by geometry → face +Z → straighten into a T-pose → scale/ground
+→ write VRM 1.0 with toon (MToon) shading into the app's character library.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from dancer_pipeline.char.gltf_read import read_glb  # noqa: E402
+from dancer_pipeline.char.gltf_write import write_glb  # noqa: E402
+from dancer_pipeline.char.humanoid import MappingError, find_humanoid  # noqa: E402
+from dancer_pipeline.char.normalize import normalize  # noqa: E402
+from dancer_pipeline.library import app_data_dir  # noqa: E402
+from dancer_pipeline.progress import Progress  # noqa: E402
+
+STAGES = {"read": (0, 0.15), "map": (0.15, 0.3), "pose": (0.3, 0.85), "save": (0.85, 1.0)}
+
+MTOON = {
+    "toon": {
+        "shadingToonyFactor": 0.9, "shadingShiftFactor": -0.05, "giEqualizationFactor": 0.9, "shadeScale": 0.72,
+        "outlineWidthMode": "worldCoordinates", "outlineWidthFactor": 0.0015, "outlineColorFactor": [0.15, 0.12, 0.12],
+        "outlineLightingMixFactor": 1.0,
+    },
+    "soft": {"shadingToonyFactor": 0.5, "shadingShiftFactor": 0.0, "giEqualizationFactor": 0.9, "shadeScale": 0.8},
+}
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description="리깅된 GLB → VRM 캐릭터 (Desktop Dancer)")
+    p.add_argument("input", help="리깅된 .glb (UniRig merge 결과 등)")
+    p.add_argument("--name", help="캐릭터 이름 (기본: 파일 이름)")
+    p.add_argument("--out", help="출력 .vrm 경로 또는 폴더 (기본: 앱 캐릭터 라이브러리)")
+    p.add_argument("--height", type=float, default=1.6, help="키 (m, 기본 1.6)")
+    p.add_argument("--flip", action="store_true", help="앞뒤 반대로 (결과가 뒤돌아 있을 때)")
+    p.add_argument("--no-tpose", action="store_true", help="T포즈로 펴지 않음")
+    p.add_argument("--shading", choices=["toon", "soft"], default="toon", help="toon: 애니풍(외곽선 포함) / soft: 부드러운 음영")
+    p.add_argument("--author", default="Desktop Dancer user")
+    p.add_argument("--progress-json", action="store_true")
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    a = parse_args(argv)
+    pr = Progress(a.progress_json, STAGES)
+    try:
+        return _main(a, pr)
+    except (MappingError, ValueError) as e:
+        pr.error(str(e))
+        raise SystemExit(1) from None
+    except SystemExit:
+        raise
+    except Exception as e:
+        if a.progress_json:
+            pr.error(f"{type(e).__name__}: {e}")
+            raise SystemExit(1) from None
+        raise
+
+
+def _main(a, pr):
+    src = Path(a.input)
+    if not src.exists():
+        raise ValueError(f"파일이 없습니다: {src}")
+    if src.suffix.lower() not in (".glb", ".vrm"):
+        raise ValueError("GLB 파일만 지원합니다 (FBX는 Blender에서 GLB로 내보내 주세요)")
+    pr.stage("read", 0, "모델 읽는 중")
+    model = read_glb(src)
+    tris = sum(len(p.indices) // 3 for p in model.prims)
+    pr.log(f"{len(model.joint_names)} bones, {tris} triangles, {len(model.images)} textures")
+
+    pr.stage("map", 0, "뼈대 분석 중 (머리·팔·다리 찾기)")
+    mapping = find_humanoid(model)
+    for w in mapping.warnings:
+        pr.log("주의: " + w)
+
+    pr.stage("pose", 0, "T포즈로 펴는 중")
+    model = normalize(model, mapping, height=a.height, flip=a.flip, tpose=not a.no_tpose,
+                      on_step=lambda f: pr.stage("pose", f))
+
+    pr.stage("save", 0, "VRM 저장 중")
+    name = a.name or src.stem
+    out = Path(a.out) if a.out else app_data_dir() / "library" / "characters"
+    if out.suffix.lower() != ".vrm":
+        out.mkdir(parents=True, exist_ok=True)
+        out = out / f"{name}.vrm"
+    else:
+        out.parent.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "name": name,
+        "version": "1.0",
+        "authors": [a.author],
+        "licenseUrl": "https://vrm.dev/licenses/1.0/",
+        "avatarPermission": "onlyAuthor",
+        "commercialUsage": "personalNonProfit",
+        "creditNotation": "required",
+        "allowRedistribution": False,
+        "modification": "allowModification",
+        "allowExcessivelyViolentUsage": False,
+        "allowExcessivelySexualUsage": False,
+        "allowPoliticalOrReligiousUsage": False,
+        "allowAntisocialOrHateUsage": False,
+    }
+    write_glb(model, out, name=name, vrm={"humanBones": mapping.bones, "meta": meta}, mtoon=dict(MTOON[a.shading]))
+    info = {
+        "name": name,
+        "source": str(src),
+        "created": dt.datetime.now().isoformat(timespec="seconds"),
+        "bones": {k: model.joint_names[v] for k, v in mapping.bones.items()},
+        "triangles": tris,
+        "warnings": mapping.warnings,
+        "options": {"height": a.height, "flip": a.flip, "tpose": not a.no_tpose, "shading": a.shading},
+    }
+    out.with_suffix(".json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+    pr.log(f"saved {out}")
+    pr.done(out=str(out), triangles=tris, warnings=mapping.warnings)
+    return out
+
+
+if __name__ == "__main__":
+    main()

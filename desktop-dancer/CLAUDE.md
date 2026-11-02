@@ -22,6 +22,12 @@ This folder is separate from the photo editor at the repo root and has its own `
 - `DANCER_PYTHON=<python>` skips the setup. `DANCER_OPEN_STUDIO=1` opens the window at launch. E2E tests drive the window with Playwright `_electron`.
 - userData is pinned to `appData/desktop-dancer` in both dev and packaged builds. The pipeline gets it through `DANCER_DATA_DIR`.
 
+## Character pipeline (Part A)
+- `char/gltf_read.py` flattens any rigged GLB into a world-space bind pose. `rig.py` handles posing and bake (LBS).
+- `char/humanoid.py` finds VRM bones from geometry. `normalize.py` handles facing +Z, T-pose, scale, and world-aligned joints.
+- `char/gltf_write.py` writes VRM 1.0 with MToon. It writes VRM directly, without Blender or UniVRM.
+- Preview any model with `node scripts/preview/preview.mjs model.vrm out.png [--motion m.vrma --t 1.5] [--skeleton]`. Set `NODE_PATH` to the global node_modules for playwright.
+
 ## Layout
 - `src/main.js`: window, tray, library, IPC. `src/placement.js`: pure placement math.
 - `src/renderer/`: rendering, hit-testing (pixel alpha → `setIgnoreMouseEvents`), FPS cap.
@@ -42,6 +48,9 @@ This folder is separate from the photo editor at the repo root and has its own `
 2. ✅ B: video → VRMA (`pipeline/`, Python CLI). MediaPipe runs locally. GVHMR runs on a cloud GPU via `pipeline/cloud/`.
    Test with `python pipeline/tests/test_roundtrip.py`. For real-video accuracy, render a known motion with
    `DANCER_RECORD=dir`, extract it, and compare with `pipeline/tools/compare_motion.py`.
-3. A: one image → rigged VRM (UniRig + humanoid bone mapping) → plays in the app.
+3. ✅ A: image → TRELLIS + UniRig (cloud, `pipeline/cloud/run_character.sh`) → `make_character.py` → VRM.
+   The mapping, T-pose and VRM writer live in `pipeline/dancer_pipeline/char/` and need only numpy.
+   Test with `python pipeline/tests/test_character.py`. Real-model fixtures come from `pipeline/tests/make_char_fixture.py <any.vrm>`.
+   The cloud script is not verified on a GPU yet.
 4. D: call the pipelines from the app and manage the library.
 5. Quality: post-processing, idle and interaction, music.

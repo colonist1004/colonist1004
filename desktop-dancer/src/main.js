@@ -18,6 +18,7 @@ const SAMPLE_VRM_URL =
 let win = null;
 let tray = null;
 let studio = null;
+let charStudio = null;
 
 // ----------------------------------------------------------------- library
 
@@ -239,6 +240,7 @@ function rebuildTrayMenu() {
   const menu = Menu.buildFromTemplate([
     { label: s.visible ? '숨기기' : '보이기', click: () => setVisible(!s.visible) },
     { label: '춤 만들기 (영상에서)…', click: openStudio },
+    { label: '캐릭터 만들기 (그림에서)…', click: openCharStudio },
     { type: 'separator' },
     {
       label: '캐릭터',
@@ -510,6 +512,108 @@ ipcMain.handle('studio:open-folder', () => {
   shell.openPath(path.join(userLibrary(), 'motions'));
 });
 
+
+// -------------------------------------------------------- 캐릭터 만들기 window
+
+function openCharStudio() {
+  if (charStudio) {
+    charStudio.show();
+    charStudio.focus();
+    return;
+  }
+  charStudio = new BrowserWindow({
+    width: 780,
+    height: 940,
+    minWidth: 560,
+    minHeight: 500,
+    title: '캐릭터 만들기 — Desktop Dancer',
+    autoHideMenuBar: true,
+    backgroundColor: '#f4f5f8',
+    webPreferences: {
+      preload: path.join(__dirname, 'charstudio-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  charStudio.loadFile(path.join(__dirname, 'charstudio', 'index.html'));
+  charStudio.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  charStudio.webContents.on('will-navigate', (e) => e.preventDefault());
+  if (process.env.DANCER_SELFTEST) {
+    charStudio.webContents.on('console-message', (_e, level, message) => console.log(`[char:${level}] ${message}`));
+  }
+  charStudio.on('closed', () => {
+    runner.cancel();
+    charStudio = null;
+  });
+}
+
+const reply = (e, channel) => (v) => !e.sender.isDestroyed() && e.sender.send(channel, v);
+
+ipcMain.handle('char:setup', async (e) => {
+  try {
+    await runner.setup(reply(e, 'char:setup-log'));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('char:check-image', async (e, file) => {
+  if (typeof file !== 'string' || !/\.(png|jpe?g|webp)$/i.test(file)) return { type: 'error', msg: '그림 파일(png/jpg/webp)이 아닙니다' };
+  try {
+    return await runner.runJob([file], reply(e, 'char:job'), 'check_image.py');
+  } catch (err) {
+    return { type: 'error', msg: err.message };
+  }
+});
+
+ipcMain.handle('char:convert', async (e, opts) => {
+  try {
+    ensureUserLibrary();
+    const args = runner.buildCharArgs(opts || {}, path.join(userLibrary(), 'characters'));
+    return await runner.runJob(args, reply(e, 'char:job'), 'make_character.py');
+  } catch (err) {
+    return { type: 'error', msg: err.message };
+  }
+});
+
+ipcMain.handle('char:import-vrm', (_e, file) => {
+  try {
+    if (typeof file !== 'string' || !/\.vrm$/i.test(file)) throw new Error('.vrm 파일이 아닙니다');
+    const buf = fs.readFileSync(file);
+    if (buf.toString('latin1', 0, 4) !== 'glTF') throw new Error('VRM(glTF 바이너리) 형식이 아닙니다');
+    ensureUserLibrary();
+    const dest = path.join(userLibrary(), 'characters', `${runner.safeName(path.basename(file, path.extname(file)))}.vrm`);
+    fs.writeFileSync(dest, buf);
+    return { out: dest };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('char:read-library-file', (_e, file) => {
+  if (typeof file !== 'string' || !isLibraryFile(file)) throw new Error('not a library file');
+  const buf = fs.readFileSync(file);
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+});
+
+ipcMain.handle('char:read-sample-motion', () => {
+  const buf = fs.readFileSync(path.join(bundledAssets(), 'motions', 'sample-dance.vrma'));
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+});
+
+ipcMain.handle('char:open-cloud-folder', () => shell.openPath(runner.pipelineDir()));
+
+ipcMain.handle('char:apply', (_e, file) => {
+  if (typeof file !== 'string' || !isLibraryFile(file)) return false;
+  settings.update({ character: file });
+  sendLoad();
+  rebuildTrayMenu();
+  if (!settings.get().visible) setVisible(true);
+  return true;
+});
+
 // --------------------------------------------------------------- lifecycle
 
 if (!app.requestSingleInstanceLock()) {
@@ -558,6 +662,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   if (process.env.DANCER_OPEN_STUDIO) app.whenReady().then(() => setTimeout(openStudio, 300));
+  if (process.env.DANCER_OPEN_CHAR) app.whenReady().then(() => setTimeout(openCharStudio, 300));
 
   app.on('window-all-closed', () => {
     // Keep running in the tray.

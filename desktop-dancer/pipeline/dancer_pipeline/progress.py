@@ -9,8 +9,9 @@ STAGES = {"download": (0.0, 0.15), "model": (0.15, 0.2), "pose": (0.2, 0.9), "po
 
 
 class Progress:
-    def __init__(self, json_mode: bool = False):
+    def __init__(self, json_mode: bool = False, stages: dict | None = None):
         self.json = json_mode
+        self.stages = stages or STAGES
 
     def _emit(self, obj):
         print("@@" + json.dumps(obj, ensure_ascii=False), flush=True)
@@ -24,7 +25,7 @@ class Progress:
 
     def stage(self, name: str, frac: float = 0.0, msg: str | None = None):
         """Report progress inside a stage (frac 0..1)."""
-        a, b = STAGES.get(name, (0, 1))
+        a, b = self.stages.get(name, (0, 1))
         if self.json:
             self._emit({"type": "progress", "stage": name, "frac": round(a + (b - a) * max(0, min(1, frac)), 4),
                         **({"msg": msg} if msg else {})})

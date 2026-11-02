@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'sha256-3ws5hJ8Kpngr7jy3uFKjCA1oG4UesNMcAhRe9qmT7ZY='; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' data: blob:"
+    />
+    <title>캐릭터 만들기 — Desktop Dancer</title>
+    <link rel="stylesheet" href="../studio/studio.css" />
+    <link rel="stylesheet" href="charstudio.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "../renderer/vendor/three.module.js",
+          "three/addons/": "../renderer/vendor/jsm/",
+          "@pixiv/three-vrm": "../renderer/vendor/three-vrm.module.js",
+          "@pixiv/three-vrm-animation": "../renderer/vendor/three-vrm-animation.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header>
+      <h1>캐릭터 만들기</h1>
+      <p class="sub">캐릭터 그림 한 장으로 춤추는 3D 캐릭터(VRM)를 만듭니다.</p>
+    </header>
+
+    <section id="setup" class="card" hidden>
+      <h2>처음 한 번만: 준비하기</h2>
+      <div id="setup-nopython" hidden>
+        <p>
+          변환 도구에 <b>Python</b>이 필요한데 이 PC에서 찾지 못했습니다. Python 3.12를 설치할 때
+          <b>“Add python.exe to PATH”</b>를 꼭 체크하고, 끝나면 <b>다시 확인</b>을 누르세요.
+        </p>
+        <div class="row">
+          <button id="btn-get-python" class="primary">Python 내려받기 페이지 열기</button>
+          <button id="btn-recheck">다시 확인</button>
+        </div>
+      </div>
+      <div id="setup-ready" hidden>
+        <p><span id="setup-python"></span> 을(를) 찾았습니다. 변환 도구를 설치합니다 (몇 분 걸릴 수 있어요).</p>
+        <div class="row"><button id="btn-setup" class="primary">설치 시작</button></div>
+      </div>
+      <pre id="setup-log" class="log" hidden></pre>
+    </section>
+
+    <main id="main" hidden>
+      <!-- 1. image -->
+      <section class="card">
+        <h2><span class="step">1</span> 캐릭터 그림 고르기</h2>
+        <div class="two">
+          <label id="drop-img" class="drop" tabindex="0">
+            <input id="file-img" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            <img id="img-preview" alt="" hidden />
+            <span id="img-hint" class="drop-big">그림을 끌어 놓거나 클릭해서 선택</span>
+          </label>
+          <div>
+            <p class="muted tight">잘 되는 그림</p>
+            <ul class="tips">
+              <li>머리부터 발끝까지 <b>전신</b>이 보이게</li>
+              <li><b>정면</b>을 보고 서 있는 모습</li>
+              <li>팔을 옆으로 벌린 <b>T자/A자 포즈</b></li>
+              <li>단색 배경, 한 명만</li>
+            </ul>
+            <ul id="checks" class="checks"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. cloud -->
+      <section class="card">
+        <h2><span class="step">2</span> 클라우드 GPU에서 3D로 만들기</h2>
+        <p>
+          그림을 3D로 만들고 뼈대를 넣는 AI(TRELLIS + UniRig)는 <b>NVIDIA GPU</b>가 필요해서 클라우드에서
+          실행합니다. RunPod 같은 서비스에서 GPU(VRAM 16GB 이상)를 잠깐 빌리면 됩니다. 시간당 수백 원 정도이고,
+          첫 실행은 설치 때문에 20~30분, 이후엔 캐릭터당 3~5분 걸립니다.
+        </p>
+        <ol class="steps">
+          <li>GPU 인스턴스를 시작합니다 (예: RunPod → PyTorch 템플릿, RTX 4090 / A5000 / A100).</li>
+          <li>
+            아래 버튼으로 연 <b>pipeline</b> 폴더 전체와 1번의 그림을 인스턴스에 올립니다.
+            <div class="row"><button id="btn-cloud-folder">올릴 폴더 열기</button></div>
+          </li>
+          <li>
+            인스턴스의 터미널에서 이 명령을 실행합니다.
+            <div class="cmd-row"><code id="cmd">bash pipeline/cloud/run_character.sh 그림파일.png</code><button id="btn-copy">복사</button></div>
+          </li>
+          <li>끝나면 생기는 <b>.vrm</b> 파일(또는 <b>.rigged.glb</b>)을 내 PC로 내려받습니다.</li>
+        </ol>
+        <p class="hint">TRELLIS와 UniRig는 MIT 라이선스입니다. 남의 캐릭터나 실존 인물 그림은 개인 감상용으로만 쓰세요.</p>
+      </section>
+
+      <!-- 3. import -->
+      <section class="card">
+        <h2><span class="step">3</span> 결과 가져오기</h2>
+        <label id="drop-model" class="drop" tabindex="0">
+          <input id="file-model" type="file" accept=".vrm,.glb" hidden />
+          <span class="drop-big">내려받은 .vrm 또는 .rigged.glb 를 끌어 놓거나 클릭</span>
+          <span class="drop-small">다른 곳에서 구한 VRM 캐릭터도 넣을 수 있어요</span>
+        </label>
+        <div id="glb-options" hidden>
+          <div class="grid">
+            <label for="name">이름</label>
+            <input id="name" type="text" />
+            <label for="height">키</label>
+            <div class="slider"><input id="height" type="range" min="1.2" max="2.0" step="0.05" value="1.6" /><span id="height-label">1.60 m</span></div>
+            <span>그림체</span>
+            <div class="seg" id="shading">
+              <button data-v="toon" class="on">애니풍 (외곽선)</button>
+              <button data-v="soft">부드럽게</button>
+            </div>
+          </div>
+          <div class="row" style="margin-top: 12px">
+            <button id="btn-convert" class="primary big">VRM으로 변환</button>
+          </div>
+        </div>
+        <div id="progress" hidden>
+          <div class="bar"><div id="bar-fill"></div></div>
+          <p id="progress-text" class="muted"></p>
+        </div>
+        <div id="error" class="error" hidden></div>
+        <details class="adv"><summary>자세한 로그</summary><pre id="log" class="log"></pre></details>
+      </section>
+
+      <!-- 4. preview -->
+      <section class="card" id="preview-card" hidden>
+        <h2><span class="step">4</span> 확인하고 적용</h2>
+        <div class="preview-wrap"><canvas id="preview"></canvas></div>
+        <div class="row" style="margin-top: 10px">
+          <button id="btn-dance">▶ 춤 미리보기</button>
+          <button id="btn-flip" hidden title="캐릭터가 뒤를 보고 있으면 눌러 주세요">앞뒤가 반대예요</button>
+          <span class="spacer"></span>
+          <button id="btn-apply" class="primary">이 캐릭터로 바꾸기</button>
+        </div>
+        <p id="warnings" class="hint"></p>
+      </section>
+    </main>
+
+    <script src="charstudio-ui.js"></script>
+    <script type="module" src="charstudio-preview.js"></script>
+  </body>
+</html>

@@ -138,12 +138,13 @@ function buildArgs(o, outDir) {
   return args;
 }
 
-/** Runs extract_dance.py; onEvent gets parsed {type: progress|log|done|error} events. */
-function runJob(argv, onEvent) {
+/** Runs a pipeline script (default extract_dance.py); onEvent gets parsed {type: progress|log|done|error} events. */
+function runJob(argv, onEvent, scriptName = 'extract_dance.py') {
   if (current) throw new Error('이미 작업 중입니다');
-  const script = path.join(pipelineDir(), 'extract_dance.py');
+  const script = path.join(pipelineDir(), scriptName);
   let finished = null;
-  const p = stream(envPython(), [script, ...argv, '--progress-json'], (line) => {
+  const flag = scriptName === 'check_image.py' ? '--json' : '--progress-json';
+  const p = stream(envPython(), [script, ...argv, flag], (line) => {
     if (line.startsWith('@@')) {
       try {
         const ev = JSON.parse(line.slice(2));
@@ -169,4 +170,16 @@ function cancel() {
   if (current) current.kill();
 }
 
-module.exports = { init, status, setup, runJob, buildArgs, cancel, cacheDir, pipelineDir };
+/** make_character.py arguments from validated options. */
+function buildCharArgs(o, outDir) {
+  if (typeof o.input !== 'string' || !/\.(glb|vrm)$/i.test(o.input)) throw new Error('리깅된 .glb 파일을 선택하세요');
+  const name = safeName(o.name);
+  const args = [o.input, '--name', name, '--out', path.join(outDir, `${name}.vrm`)];
+  const h = Number(o.height);
+  if (Number.isFinite(h) && h > 0.3 && h < 3) args.push('--height', String(h));
+  if (o.flip) args.push('--flip');
+  if (['toon', 'soft'].includes(o.shading)) args.push('--shading', o.shading);
+  return args;
+}
+
+module.exports = { init, status, setup, runJob, buildArgs, buildCharArgs, cancel, cacheDir, pipelineDir, safeName };
