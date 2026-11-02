@@ -61,17 +61,22 @@ function frameCharacter() {
   resize();
 }
 
+// The character's true frame size in px (from main). At big sizes the window is cut at the screen
+// edges; the camera keeps the same scale so the character stays its size, feet at the bottom.
+let frame = null;
+
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(w, h, false);
-  const aspect = w / h;
   const pad = viewHeight * 0.01; // keep the soles visible right at the bottom edge
-  camera.left = (-viewHeight * aspect) / 2;
-  camera.right = (viewHeight * aspect) / 2;
-  camera.top = viewHeight - pad;
+  const frameH = frame?.nominalHeight || h;
+  const unitsPerPx = viewHeight / frameH;
+  camera.left = (-w * unitsPerPx) / 2;
+  camera.right = (w * unitsPerPx) / 2;
   camera.bottom = -pad;
+  camera.top = -pad + h * unitsPerPx;
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
@@ -170,7 +175,7 @@ function hitTest() {
 
 window.addEventListener('mousemove', (e) => {
   pointer = { x: e.clientX, y: e.clientY };
-  if (dragging) api.drag('move', e.screenX);
+  if (dragging) api.drag('move', e.screenX, e.screenY);
 });
 window.addEventListener('mouseleave', () => {
   pointer = null;
@@ -181,14 +186,14 @@ canvas.addEventListener('pointerdown', (e) => {
   dragging = true;
   canvas.setPointerCapture(e.pointerId);
   document.body.classList.add('dragging');
-  api.drag('start', e.screenX);
+  api.drag('start', e.screenX, e.screenY);
 });
 const endDrag = (e) => {
   if (!dragging) return;
   dragging = false;
   canvas.releasePointerCapture?.(e.pointerId);
   document.body.classList.remove('dragging');
-  api.drag('end', e.screenX);
+  api.drag('end', e.screenX, e.screenY);
 };
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
@@ -254,6 +259,16 @@ function tick() {
 // ---------------------------------------------------------------- startup
 
 api.onLoad(load);
+api.onFrame((f) => {
+  frame = f;
+  resize();
+});
+// Ctrl + mouse wheel over the character: bigger / smaller.
+window.addEventListener('wheel', (e) => {
+  if (!hovering || !e.ctrlKey) return;
+  e.preventDefault();
+  api.resizeBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+}, { passive: false });
 api.onCustom(({ character, custom }) => {
   if (!vrm || character !== currentCharacter) return;
   applyCustomization(vrm, custom);

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <title>위치·크기 — Desktop Dancer</title>
+    <link rel="stylesheet" href="../studio/studio.css" />
+    <link rel="stylesheet" href="placewin.css" />
+  </head>
+  <body>
+    <header>
+      <h1>위치·크기</h1>
+      <p class="sub">바꾸는 즉시 적용됩니다. 캐릭터를 마우스로 끌어 옮기거나, 캐릭터 위에서 <b>Ctrl + 휠</b>로 크기를 바꿀 수도 있어요.</p>
+    </header>
+
+    <section class="card">
+      <h2>크기</h2>
+      <div class="ctl">
+        <input id="scale" type="range" min="25" max="800" step="1" />
+        <input id="scale-num" type="number" min="25" max="800" step="1" class="num" /><span>%</span>
+      </div>
+      <div class="row nudges">
+        <button data-scale="-10">−10%</button>
+        <button data-scale="-1">−1%</button>
+        <button data-scale="1">+1%</button>
+        <button data-scale="10">+10%</button>
+      </div>
+      <div class="row nudges">
+        <button data-preset="50">50%</button>
+        <button data-preset="100">100%</button>
+        <button data-preset="200">200%</button>
+        <button data-preset="400">400%</button>
+        <button data-preset="800">800%</button>
+      </div>
+      <p id="crop-note" class="hint" hidden>캐릭터가 화면보다 커서 위쪽(또는 양옆)이 잘려 보입니다.</p>
+    </section>
+
+    <section class="card">
+      <h2>가로 위치</h2>
+      <div class="ctl">
+        <input id="x" type="range" min="0" max="1000" step="1" />
+        <input id="x-num" type="number" step="1" class="num" /><span>px</span>
+      </div>
+      <div class="row nudges">
+        <button data-x="-10">← 10</button>
+        <button data-x="-1">← 1</button>
+        <button data-x="1">1 →</button>
+        <button data-x="10">10 →</button>
+        <button data-xpos="0">왼쪽 끝</button>
+        <button data-xpos="0.5">가운데</button>
+        <button data-xpos="1">오른쪽 끝</button>
+      </div>
+      <p class="hint">왼쪽 끝에서부터의 거리(px)입니다.</p>
+    </section>
+
+    <section class="card">
+      <h2>높이</h2>
+      <div class="ctl">
+        <input id="y" type="range" step="1" />
+        <input id="y-num" type="number" step="1" class="num" /><span>px</span>
+      </div>
+      <div class="row nudges">
+        <button data-y="-10">↓ 10</button>
+        <button data-y="-1">↓ 1</button>
+        <button data-y="1">↑ 1</button>
+        <button data-y="10">↑ 10</button>
+        <button data-ypos="0">작업표시줄 위에 세우기</button>
+      </div>
+      <p class="hint">0 = 작업표시줄 위에 선 위치. 위로 올리면 +, 아래로 내리면 − (작업표시줄 뒤로 숨음).</p>
+    </section>
+
+    <div class="row">
+      <span class="spacer"></span>
+      <button id="reset">처음대로 (100%, 오른쪽 아래)</button>
+    </div>
+    <script src="placewin.js"></script>
+  </body>
+</html>

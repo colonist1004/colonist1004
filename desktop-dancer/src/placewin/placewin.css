@@ -1,0 +1,28 @@
+.ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ctl input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.num {
+  width: 80px;
+  text-align: right;
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+.nudges {
+  margin-top: 8px;
+}
+.nudges button {
+  padding: 5px 10px;
+}
+.spacer {
+  flex: 1;
+}

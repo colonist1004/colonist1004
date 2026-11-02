@@ -7,6 +7,7 @@ const DEFAULTS = {
   visible: true,
   scale: 1,
   xFraction: 1, // 0 = left edge of the screen, 1 = right edge (next to the tray clock)
+  yOffset: 0, // px the feet stand above the taskbar (negative: sink behind it)
   displayId: null, // null = primary display
   character: null, // absolute path; null = first in library
   motion: null,

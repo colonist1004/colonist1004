@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 
 const require = createRequire(import.meta.url);
-const { taskbarEdge, computeBounds, clampX, xFractionFor, BASE_HEIGHT } = require('../src/placement.js');
+const { taskbarEdge, computeBounds, clampX, xFractionFor, yOffsetFor, yOffsetRange, BASE_HEIGHT, BASE_WIDTH } = require('../src/placement.js');
 
 const display = (bounds, workArea) => ({ bounds, workArea });
 // 1920x1080 at 100%, taskbar 48 px at the bottom (Windows 11 default)
@@ -68,7 +68,33 @@ const tests = {
     const f = xFractionFor(bottom, x, w);
     assert.equal(computeBounds(bottom, { xFraction: f }).x, x);
   },
+  'up to 800%: window stops at the screen, feet stay on the taskbar'() {
+    const b = computeBounds(bottom, { scale: 8, xFraction: 0.5 });
+    assert.equal(b.nominalHeight, BASE_HEIGHT * 8);
+    assert.equal(b.y, 0); // cut at the top of the screen
+    assert.equal(b.y + b.height, 1032); // feet still on the taskbar
+    assert.equal(b.cropTop, BASE_HEIGHT * 8 - 1032);
+    assert.equal(b.width, Math.min(BASE_WIDTH * 8, 1920));
+    assert.equal(computeBounds(bottom, { scale: 50 }).nominalHeight, BASE_HEIGHT * 8); // clamped to 800%
+    assert.equal(computeBounds(bottom, { scale: 0.01 }).nominalHeight, Math.round(BASE_HEIGHT * 0.25));
+  },
+  'vertical offset: up, down behind the taskbar, clamped'() {
+    assert.equal(computeBounds(bottom, { yOffset: 200 }).y + computeBounds(bottom, { yOffset: 200 }).height, 832);
+    const sunk = computeBounds(bottom, { yOffset: -30 });
+    assert.equal(sunk.y + sunk.height, 1062);
+    const r = yOffsetRange(bottom);
+    assert.deepEqual(r, { min: -48, max: 972 });
+    const far = computeBounds(bottom, { yOffset: 99999 });
+    assert.equal(far.y + far.height, 1032 - 972);
+    assert.ok(far.height > 0);
+  },
+  'dragging the feet near the taskbar snaps back onto it'() {
+    assert.equal(yOffsetFor(bottom, 1032 - 7), 0);
+    assert.equal(yOffsetFor(bottom, 1032 - 40), 40);
+    assert.equal(yOffsetFor(bottom, 5000), -48);
+  },
   'bad stored settings fall back sanely'() {
+    assert.equal(computeBounds(bottom, { yOffset: NaN }).y + computeBounds(bottom, { yOffset: NaN }).height, 1032);
     const b = computeBounds(bottom, { xFraction: NaN });
     assert.equal(b.x + b.width, 1920);
     assert.equal(xFractionFor(display(bottom.bounds, { x: 0, y: 0, width: 100, height: 100 }), 0, 320), 0);

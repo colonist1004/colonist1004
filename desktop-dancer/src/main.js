@@ -79,7 +79,42 @@ function computeBounds() {
 
 function placeWindow() {
   if (!win) return;
-  win.setBounds(computeBounds());
+  const b = computeBounds();
+  win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+  // The renderer frames the character by its true size (it may be bigger than the window).
+  win.webContents.send('frame', { nominalWidth: b.nominalWidth, nominalHeight: b.nominalHeight, cropTop: b.cropTop });
+  placeWin?.webContents.send('place:changed', placementState());
+}
+
+function placementState() {
+  const s = settings.get();
+  const d = targetDisplay();
+  const b = computeBounds();
+  return {
+    scale: placement.clampScale(s.scale),
+    xFraction: s.xFraction,
+    yOffset: s.yOffset || 0,
+    yRange: placement.yOffsetRange(d),
+    freeWidth: Math.max(0, d.workArea.width - b.width),
+    minScale: placement.MIN_SCALE,
+    maxScale: placement.MAX_SCALE,
+    cropped: b.cropTop > 0 || b.width < b.nominalWidth,
+  };
+}
+
+/** Partial update from the placement window / mouse wheel, validated. */
+function updatePlacement(patch) {
+  const next = {};
+  if (Number.isFinite(patch.scale)) next.scale = placement.clampScale(patch.scale);
+  if (Number.isFinite(patch.xFraction)) next.xFraction = Math.min(1, Math.max(0, patch.xFraction));
+  if (Number.isFinite(patch.yOffset)) {
+    const r = placement.yOffsetRange(targetDisplay());
+    next.yOffset = Math.round(Math.min(r.max, Math.max(r.min, patch.yOffset)));
+  }
+  settings.update(next);
+  placeWindow();
+  rebuildTrayMenu();
+  return placementState();
 }
 
 function createWindow() {
@@ -122,6 +157,7 @@ function createWindow() {
   win.once('ready-to-show', () => {
     if (settings.get().visible) win.showInactive();
   });
+  win.webContents.on('did-finish-load', placeWindow); // sends the frame info
   win.on('closed', () => (win = null));
 }
 
@@ -260,18 +296,19 @@ function rebuildTrayMenu() {
       ],
     },
     {
-      label: '크기',
-      submenu: [0.6, 0.8, 1, 1.25, 1.5, 2].map((v) => ({
-        label: `${Math.round(v * 100)}%`,
-        type: 'radio',
-        checked: Math.abs(s.scale - v) < 1e-3,
-        click: () => {
-          settings.update({ scale: v });
-          placeWindow();
-          rebuildTrayMenu();
-        },
-      })),
+      label: `크기 (${Math.round(placement.clampScale(s.scale) * 100)}%)`,
+      submenu: [
+        ...[0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8].map((v) => ({
+          label: `${Math.round(v * 100)}%`,
+          type: 'radio',
+          checked: Math.abs(s.scale - v) < 1e-3,
+          click: () => updatePlacement({ scale: v }),
+        })),
+        { type: 'separator' },
+        { label: '위치·크기 자세히 조정…', click: openPlaceWindow },
+      ],
     },
+    { label: '위치·크기 자세히 조정…', click: openPlaceWindow },
     {
       label: '모니터',
       enabled: displays.length > 1,
@@ -323,7 +360,7 @@ function rebuildTrayMenu() {
     {
       label: '위치 초기화',
       click: () => {
-        settings.update({ xFraction: 1, displayId: null });
+        settings.update({ xFraction: 1, yOffset: 0, displayId: null });
         placeWindow();
         rebuildTrayMenu();
       },
@@ -411,30 +448,70 @@ ipcMain.on('set-hover', (_e, hovering) => {
   win?.setIgnoreMouseEvents(!hovering, { forward: true });
 });
 
-// Horizontal drag along the taskbar. `dx` is in DIP.
+// Drag the character anywhere: x along the work area, y as a height above the taskbar
+// (snaps back onto the taskbar when released close to it). Coordinates are DIP.
 let dragStart = null;
-ipcMain.on('drag', (_e, phase, screenX) => {
+ipcMain.on('drag', (_e, phase, screenX, screenY) => {
   if (!win) return;
+  const d = targetDisplay();
   if (phase === 'start') {
-    dragStart = { mouseX: screenX, winX: win.getBounds().x };
+    const b = win.getBounds();
+    dragStart = { mouseX: screenX, mouseY: screenY, winX: b.x, bottom: b.y + b.height };
   } else if (phase === 'move' && dragStart) {
+    const cur = computeBounds();
+    const x = placement.clampX(d, dragStart.winX + (screenX - dragStart.mouseX), cur.width);
+    const yOffset = placement.yOffsetFor(d, dragStart.bottom + (screenY - dragStart.mouseY));
+    settings.update({ yOffset });
     const b = computeBounds();
-    win.setBounds({ ...b, x: placement.clampX(targetDisplay(), dragStart.winX + (screenX - dragStart.mouseX), b.width) });
+    win.setBounds({ x, y: b.y, width: b.width, height: b.height });
+    win.webContents.send('frame', { nominalWidth: b.nominalWidth, nominalHeight: b.nominalHeight, cropTop: b.cropTop });
   } else if (phase === 'end' && dragStart) {
     const { x, width } = win.getBounds();
-    settings.update({ xFraction: placement.xFractionFor(targetDisplay(), x, width) });
+    settings.update({ xFraction: placement.xFractionFor(d, x, width) });
     dragStart = null;
+    placeWin?.webContents.send('place:changed', placementState());
   }
 });
 
-if (process.env.DANCER_RECORD) {
-  ipcMain.on('dev-frame', (_e, i, dataUrl) => {
-    const dir = process.env.DANCER_RECORD;
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, `frame_${String(i).padStart(5, '0')}.png`), Buffer.from(dataUrl.split(',')[1], 'base64'));
+// Ctrl + mouse wheel over the character: resize by steps.
+ipcMain.on('resize-by', (_e, factor) => {
+  if (Number.isFinite(factor) && factor > 0.5 && factor < 2) updatePlacement({ scale: settings.get().scale * factor });
+});
+
+// ---------------------------------------------------- 위치·크기 window
+
+let placeWin = null;
+function openPlaceWindow() {
+  if (placeWin) {
+    placeWin.show();
+    placeWin.focus();
+    return;
+  }
+  placeWin = new BrowserWindow({
+    width: 460,
+    height: 560,
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    title: '위치·크기 — Desktop Dancer',
+    autoHideMenuBar: true,
+    backgroundColor: '#f4f5f8',
+    webPreferences: {
+      preload: path.join(__dirname, 'placewin-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
   });
-  ipcMain.on('dev-record-done', () => app.quit());
+  placeWin.loadFile(path.join(__dirname, 'placewin', 'index.html'));
+  placeWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  placeWin.webContents.on('will-navigate', (e) => e.preventDefault());
+  placeWin.on('closed', () => (placeWin = null));
 }
+
+ipcMain.handle('place:get', () => placementState());
+ipcMain.handle('place:set', (_e, patch) => updatePlacement(patch && typeof patch === 'object' ? patch : {}));
+ipcMain.handle('place:reset', () => updatePlacement({ scale: 1, xFraction: 1, yOffset: 0 }));
 
 ipcMain.on('renderer-error', (_e, msg) => {
   console.error('[renderer]', msg);
@@ -711,6 +788,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   if (process.env.DANCER_OPEN_STUDIO) app.whenReady().then(() => setTimeout(openStudio, 300));
+  if (process.env.DANCER_OPEN_PLACE) app.whenReady().then(() => setTimeout(openPlaceWindow, 300));
   if (process.env.DANCER_OPEN_CHAR) app.whenReady().then(() => setTimeout(openCharStudio, 300));
 
   app.on('window-all-closed', () => {
