@@ -2,5 +2,6 @@
   "appId": "com.colonist1004.photoeditor",
   "appName": "사진 편집기",
   "webDir": "www",
-  "android": { "allowMixedContent": false }
+  "backgroundColor": "#121316",
+  "android": { "allowMixedContent": false, "backgroundColor": "#121316" }
 }

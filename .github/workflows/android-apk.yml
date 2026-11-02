@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: ["**"]
-    paths: ["www/**", "android/**", "package*.json", "capacitor.config.json", ".github/workflows/android-apk.yml"]
+    paths: ["www/**", "android/**", "scripts/**", "package*.json", "capacitor.config.json", ".github/workflows/android-apk.yml"]
   workflow_dispatch:
 
 jobs:
@@ -30,8 +30,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Sync web assets into Android project
-        run: npx cap sync android
+      - name: Copy web libraries and sync into Android project
+        run: npm run sync
 
       - name: Build debug APK
         working-directory: android
