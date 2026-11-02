@@ -23,7 +23,9 @@ jobs:
           java-version: 17
           cache: gradle
 
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest runners ship with the Android SDK preinstalled (ANDROID_HOME)
+      - name: Check Android SDK
+        run: echo "ANDROID_HOME=$ANDROID_HOME" && ls "$ANDROID_HOME/platforms"
 
       - name: Install dependencies
         run: npm ci
