@@ -1,0 +1,3 @@
+# Installed with --no-deps: rtmlib pins onnxruntime and opencv-contrib-python,
+# which would clash with onnxruntime-directml / opencv-python.
+rtmlib==0.0.16

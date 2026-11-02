@@ -146,6 +146,7 @@ async function convert() {
     height: Number($('height').value),
     shading: state.shading,
     flip: state.flip,
+    autorig: $('autorig').checked,
   });
   state.running = false;
   $('btn-convert').disabled = false;
@@ -159,28 +160,61 @@ async function convert() {
 }
 $('btn-convert').onclick = convert;
 
-// ------------------------------------------------------------------ 4. preview
-async function finish(out, warnings, fromGlb) {
-  state.result = out;
+// ------------------------------------------------------------------ 4. preview, tweak, apply
+async function refreshCharacters(select) {
+  const list = await api.listCharacters();
+  const sel = $('char-select');
+  sel.innerHTML = '';
+  for (const c of list) {
+    const o = document.createElement('option');
+    o.value = c.path;
+    o.textContent = c.name + (c.current ? ' (지금 춤추는 캐릭터)' : '');
+    sel.appendChild(o);
+  }
+  const pick = select || list.find((c) => c.current)?.path || list[0]?.path;
+  if (pick) sel.value = pick;
+  return pick;
+}
+
+async function showCharacter(file, fromGlb = false, warnings = []) {
+  state.result = file;
   show('preview-card', true);
   show('btn-flip', fromGlb);
   $('warnings').textContent = warnings.length ? `참고: ${warnings.join(' · ')}` : '';
-  $('btn-apply').textContent = '이 캐릭터로 바꾸기';
+  $('btn-apply').textContent = '저장하고 이 캐릭터로 바꾸기';
   $('btn-dance').textContent = '▶ 춤 미리보기';
-  await window.preview.load(out);
+  await window.charPreview.load(file);
+}
+
+async function finish(out, warnings, fromGlb) {
+  await refreshCharacters(out);
+  await showCharacter(out, fromGlb, warnings);
   $('preview-card').scrollIntoView({ behavior: 'smooth' });
 }
+
+$('char-select').addEventListener('change', () => showCharacter($('char-select').value));
 $('btn-dance').onclick = async () => {
-  const on = await window.preview.toggleDance();
+  const on = await window.charPreview.toggleDance();
   $('btn-dance').textContent = on ? '■ 춤 멈추기' : '▶ 춤 미리보기';
 };
 $('btn-flip').onclick = () => {
   state.flip = !state.flip;
   convert();
 };
+$('btn-reset').onclick = () => window.charPreview.resetCustom();
 $('btn-apply').onclick = async () => {
+  await window.charPreview.saveCustom();
   await api.apply(state.result);
-  $('btn-apply').textContent = '적용했어요 ✓';
+  $('btn-apply').textContent = '저장하고 적용했어요 ✓';
+  refreshCharacters(state.result);
 };
+for (const b of document.querySelectorAll('[data-link]')) b.onclick = () => api.openLink(b.dataset.link);
 
-checkSetup();
+// Show the library right away so existing characters can be tweaked too.
+const whenPreview = () => new Promise((r) => (window.charPreview ? r() : setTimeout(() => whenPreview().then(r), 50)));
+checkSetup().then(async () => {
+  await whenPreview();
+  const pick = await refreshCharacters();
+  if (pick) showCharacter(pick);
+});
+

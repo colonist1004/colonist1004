@@ -57,7 +57,8 @@ def _mat_to_trs(M):
     return node
 
 
-def write_glb(model: Model, path, *, name="model", vrm: dict | None = None, mtoon: dict | None = None):
+def write_glb(model: Model, path, *, name="model", vrm: dict | None = None, mtoon: dict | None = None,
+              skinned: bool = True):
     """vrm: {"humanBones": {vrmBone: jointIndex}, "meta": {...}} to write a VRM 1.0 file.
     mtoon: MToon parameters applied to every material (only with vrm)."""
     b = _Bin()
@@ -110,11 +111,10 @@ def write_glb(model: Model, path, *, name="model", vrm: dict | None = None, mtoo
         V = len(p.positions)
         w = p.weights / np.maximum(p.weights.sum(1, keepdims=True), 1e-9)
         w[~np.isfinite(w)] = 0
-        attrs = {
-            "POSITION": b.accessor(p.positions, 5126, "VEC3", 34962, minmax=True),
-            "JOINTS_0": b.accessor(p.joints, 5123, "VEC4", 34962),
-            "WEIGHTS_0": b.accessor(w, 5126, "VEC4", 34962),
-        }
+        attrs = {"POSITION": b.accessor(p.positions, 5126, "VEC3", 34962, minmax=True)}
+        if skinned:
+            attrs["JOINTS_0"] = b.accessor(p.joints, 5123, "VEC4", 34962)
+            attrs["WEIGHTS_0"] = b.accessor(w, 5126, "VEC4", 34962)
         if p.normals is not None:
             attrs["NORMAL"] = b.accessor(p.normals, 5126, "VEC3", 34962)
         if p.uvs is not None:
@@ -127,12 +127,16 @@ def write_glb(model: Model, path, *, name="model", vrm: dict | None = None, mtoo
             prim["material"] = 0
         prims.append(prim)
     j["meshes"] = [{"name": name, "primitives": prims}]
-    ibm = np.linalg.inv(model.joint_world).transpose(0, 2, 1).reshape(-1)  # column-major
-    j["skins"] = [{"joints": list(range(J)), "inverseBindMatrices": b.accessor(ibm, 5126, "MAT4"),
-                   "skeleton": roots[0]}]
-    nodes.append({"name": name, "mesh": 0, "skin": 0})
-    j["nodes"] = nodes
-    j["scenes"] = [{"nodes": roots + [len(nodes) - 1]}]
+    if skinned:
+        ibm = np.linalg.inv(model.joint_world).transpose(0, 2, 1).reshape(-1)  # column-major
+        j["skins"] = [{"joints": list(range(J)), "inverseBindMatrices": b.accessor(ibm, 5126, "MAT4"),
+                       "skeleton": roots[0]}]
+        nodes.append({"name": name, "mesh": 0, "skin": 0})
+        j["nodes"] = nodes
+        j["scenes"] = [{"nodes": roots + [len(nodes) - 1]}]
+    else:  # plain mesh (test fixtures for auto-rigging)
+        j["nodes"] = [{"name": name, "mesh": 0}]
+        j["scenes"] = [{"nodes": [0]}]
     if not j["textures"]:
         for k in ("images", "textures", "samplers"):
             del j[k]

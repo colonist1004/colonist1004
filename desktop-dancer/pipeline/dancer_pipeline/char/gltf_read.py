@@ -122,10 +122,8 @@ def read_glb(path) -> Model:
             while k >= 0 and k not in joint_nodes:
                 joint_nodes.add(k)
                 k = parent[k]
-    if not joint_nodes:
-        raise ValueError("뼈대(skin)가 없는 모델입니다. 리깅된 GLB가 필요합니다 (UniRig merge 결과).")
-    # Drop ancestors that only carry the scene (no joint children besides the chain) is not needed:
-    # we keep them; the humanoid mapper ignores bones it does not use.
+    unrigged = not joint_nodes
+    # Ancestors of joints are kept as joints; the humanoid mapper ignores bones it does not use.
     order = [i for i in range(len(nodes)) if i in joint_nodes]
     jindex = {n: k for k, n in enumerate(order)}
     joint_parent = []
@@ -136,7 +134,7 @@ def read_glb(path) -> Model:
         joint_parent.append(jindex.get(p, -1))
 
     # Bind matrices: inverse(IBM) where available (authoritative), else node world matrix.
-    joint_world = np.stack([W(n) for n in order])
+    joint_world = np.stack([W(n) for n in order]) if order else np.eye(4)[None]
     for s in j.get("skins", []):
         if "inverseBindMatrices" in s:
             ibm = acc(s["inverseBindMatrices"]).reshape(-1, 4, 4).transpose(0, 2, 1)
@@ -215,4 +213,6 @@ def read_glb(path) -> Model:
         else:
             images.append((b"", im.get("mimeType", "image/png")))  # external URIs are not supported
 
+    if unrigged:  # a plain mesh: one placeholder root joint; autorig.py builds the real skeleton
+        return Model(["root"], [-1], joint_world, prims, materials, images, {"unrigged": True})
     return Model([nodes[n].get("name", f"node{n}") for n in order], joint_parent, joint_world, prims, materials, images)

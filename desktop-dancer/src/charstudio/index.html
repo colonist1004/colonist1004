@@ -39,7 +39,11 @@
         </div>
       </div>
       <div id="setup-ready" hidden>
-        <p><span id="setup-python"></span> 을(를) 찾았습니다. 변환 도구를 설치합니다 (몇 분 걸릴 수 있어요).</p>
+        <p>
+          필요한 도구(Python 3.12, MediaPipe 등)를 <b>자동으로 내려받아</b> 앱 전용 폴더에 설치합니다.
+          Python을 따로 설치할 필요는 없어요. 처음 한 번, 수백 MB라 몇 분 걸릴 수 있습니다.
+          <span id="setup-python" hidden></span>
+        </p>
         <div class="row"><button id="btn-setup" class="primary">설치 시작</button></div>
       </div>
       <pre id="setup-log" class="log" hidden></pre>
@@ -68,27 +72,53 @@
         </div>
       </section>
 
-      <!-- 2. cloud -->
+      <!-- 2. make the 3D model -->
       <section class="card">
-        <h2><span class="step">2</span> 클라우드 GPU에서 3D로 만들기</h2>
-        <p>
-          그림을 3D로 만들고 뼈대를 넣는 AI(TRELLIS + UniRig)는 <b>NVIDIA GPU</b>가 필요해서 클라우드에서
-          실행합니다. RunPod 같은 서비스에서 GPU(VRAM 16GB 이상)를 잠깐 빌리면 됩니다. 시간당 수백 원 정도이고,
-          첫 실행은 설치 때문에 20~30분, 이후엔 캐릭터당 3~5분 걸립니다.
-        </p>
-        <ol class="steps">
-          <li>GPU 인스턴스를 시작합니다 (예: RunPod → PyTorch 템플릿, RTX 4090 / A5000 / A100).</li>
-          <li>
-            아래 버튼으로 연 <b>pipeline</b> 폴더 전체와 1번의 그림을 인스턴스에 올립니다.
-            <div class="row"><button id="btn-cloud-folder">올릴 폴더 열기</button></div>
-          </li>
-          <li>
-            인스턴스의 터미널에서 이 명령을 실행합니다.
-            <div class="cmd-row"><code id="cmd">bash pipeline/cloud/run_character.sh 그림파일.png</code><button id="btn-copy">복사</button></div>
-          </li>
-          <li>끝나면 생기는 <b>.vrm</b> 파일(또는 <b>.rigged.glb</b>)을 내 PC로 내려받습니다.</li>
-        </ol>
-        <p class="hint">TRELLIS와 UniRig는 MIT 라이선스입니다. 남의 캐릭터나 실존 인물 그림은 개인 감상용으로만 쓰세요.</p>
+        <h2><span class="step">2</span> 그림을 3D로 만들기 — 방법 고르기</h2>
+        <div class="routes">
+          <details class="route" open>
+            <summary><b>A. 무료 웹 생성기 + 내 PC 자동 리깅</b> <span class="tag">추천 · 그래픽카드 상관없음</span></summary>
+            <ol class="steps">
+              <li>아래 사이트 중 하나에서 1번의 그림을 올려 3D 모델을 만들고 <b>GLB</b>로 내려받습니다.
+                <div class="row">
+                  <button data-link="https://www.tripo3d.ai">Tripo</button>
+                  <button data-link="https://www.meshy.ai">Meshy</button>
+                </div>
+              </li>
+              <li>내려받은 GLB를 3번 칸에 넣으면, 뼈대는 <b>이 PC에서 자동으로</b> 넣습니다 (AMD·인텔 그래픽도 OK, 약 15초).</li>
+            </ol>
+            <p class="hint">무료 등급의 생성 횟수와 결과물 이용 조건(상업 이용, 저작자 표시 등)은 각 사이트에서 확인하세요.</p>
+          </details>
+          <details class="route">
+            <summary><b>B. 클라우드 GPU (TRELLIS + UniRig)</b> <span class="tag">오픈소스 · NVIDIA GPU 대여</span></summary>
+            <p>
+              그림→3D(TRELLIS)와 뼈대(UniRig) AI를 RunPod 같은 클라우드의 NVIDIA GPU(VRAM 16GB 이상)에서 돌립니다.
+              시간당 수백 원, 첫 실행은 설치 때문에 20~30분, 이후 캐릭터당 3~5분.
+            </p>
+            <ol class="steps">
+              <li>GPU 인스턴스를 시작합니다 (예: RunPod → PyTorch 템플릿).</li>
+              <li>
+                아래 버튼으로 연 <b>pipeline</b> 폴더 전체와 1번의 그림을 인스턴스에 올립니다.
+                <div class="row"><button id="btn-cloud-folder">올릴 폴더 열기</button></div>
+              </li>
+              <li>
+                인스턴스의 터미널에서 이 명령을 실행합니다.
+                <div class="cmd-row"><code id="cmd">bash pipeline/cloud/run_character.sh 그림파일.png</code><button id="btn-copy">복사</button></div>
+              </li>
+              <li>끝나면 생기는 <b>.vrm</b>(또는 <b>.rigged.glb</b>)을 내려받아 3번 칸에 넣습니다.</li>
+            </ol>
+            <p class="hint">TRELLIS와 UniRig는 MIT 라이선스입니다.</p>
+          </details>
+          <details class="route">
+            <summary><b>C. VRoid Studio로 직접 만들기</b> <span class="tag">슬라이더로 세밀한 디자인 · 무료</span></summary>
+            <p>
+              얼굴·눈·머리카락·옷을 슬라이더와 브러시로 직접 디자인하는 무료 프로그램입니다 (코이카츠처럼 세밀하게 조정 가능,
+              AMD 그래픽 OK). 만든 캐릭터를 <b>VRM으로 내보내기</b>한 뒤 3번 칸에 넣으면 됩니다.
+            </p>
+            <div class="row"><button data-link="https://vroid.com/en/studio">VRoid Studio 열기</button></div>
+          </details>
+        </div>
+        <p class="hint">남의 캐릭터나 실존 인물 그림은 개인 감상용으로만 쓰세요.</p>
       </section>
 
       <!-- 3. import -->
@@ -96,8 +126,8 @@
         <h2><span class="step">3</span> 결과 가져오기</h2>
         <label id="drop-model" class="drop" tabindex="0">
           <input id="file-model" type="file" accept=".vrm,.glb" hidden />
-          <span class="drop-big">내려받은 .vrm 또는 .rigged.glb 를 끌어 놓거나 클릭</span>
-          <span class="drop-small">다른 곳에서 구한 VRM 캐릭터도 넣을 수 있어요</span>
+          <span class="drop-big">만든 .glb 또는 .vrm 을 끌어 놓거나 클릭</span>
+          <span class="drop-small">뼈대 없는 GLB는 이 PC에서 자동으로 뼈대를 넣습니다 · 다른 곳에서 구한 VRM도 됩니다</span>
         </label>
         <div id="glb-options" hidden>
           <div class="grid">
@@ -105,13 +135,15 @@
             <input id="name" type="text" />
             <label for="height">키</label>
             <div class="slider"><input id="height" type="range" min="1.2" max="2.0" step="0.05" value="1.6" /><span id="height-label">1.60 m</span></div>
+            <span>뼈대</span>
+            <label class="check"><input id="autorig" type="checkbox" /> 뼈대를 새로 만들기 (들어 있는 뼈대가 이상할 때)</label>
             <span>그림체</span>
             <div class="seg" id="shading">
               <button data-v="toon" class="on">애니풍 (외곽선)</button>
               <button data-v="soft">부드럽게</button>
             </div>
           </div>
-          <div class="row" style="margin-top: 12px">
+          <div class="row mt12">
             <button id="btn-convert" class="primary big">VRM으로 변환</button>
           </div>
         </div>
@@ -123,17 +155,32 @@
         <details class="adv"><summary>자세한 로그</summary><pre id="log" class="log"></pre></details>
       </section>
 
-      <!-- 4. preview -->
+      <!-- 4. preview, tweak, apply -->
       <section class="card" id="preview-card" hidden>
-        <h2><span class="step">4</span> 확인하고 적용</h2>
+        <h2><span class="step">4</span> 확인 · 다듬기 · 적용</h2>
+        <div class="row mb10">
+          <label for="char-select">캐릭터</label>
+          <select id="char-select"></select>
+        </div>
         <div class="preview-wrap"><canvas id="preview"></canvas></div>
-        <div class="row" style="margin-top: 10px">
+        <div class="row mt10">
           <button id="btn-dance">▶ 춤 미리보기</button>
           <button id="btn-flip" hidden title="캐릭터가 뒤를 보고 있으면 눌러 주세요">앞뒤가 반대예요</button>
-          <span class="spacer"></span>
-          <button id="btn-apply" class="primary">이 캐릭터로 바꾸기</button>
         </div>
         <p id="warnings" class="hint"></p>
+        <details class="adv" id="tweak" open>
+          <summary>다듬기: 비율과 색 (원본 파일은 그대로 두고 따로 저장)</summary>
+          <div class="grid" id="sliders"></div>
+          <p class="muted tight mt12">재질별 색 (흰색 = 원래 색)</p>
+          <div class="colors" id="colors"></div>
+          <div class="row mt10">
+            <button id="btn-reset">처음대로</button>
+          </div>
+        </details>
+        <div class="row mt14">
+          <span class="spacer"></span>
+          <button id="btn-apply" class="primary">저장하고 이 캐릭터로 바꾸기</button>
+        </div>
       </section>
     </main>
 

@@ -53,13 +53,14 @@ def mirror_rotations(local):
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="춤 영상 → VRMA 모션 (Desktop Dancer)")
-    p.add_argument("input", help="영상 파일 경로 또는 URL (URL은 yt-dlp로 내려받음)")
+    p.add_argument("input", help="영상 파일 경로, URL(yt-dlp로 내려받음) 또는 다른 모캡 도구의 .bvh 파일")
     p.add_argument("--start", type=float, help="시작 시간(초)")
     p.add_argument("--end", type=float, help="끝 시간(초)")
     p.add_argument("--name", help="모션 이름 (파일 이름). 기본: 영상 파일 이름")
     p.add_argument("--out", help="출력 .vrma 경로 또는 폴더. 기본: 앱 모션 라이브러리")
-    p.add_argument("--engine", choices=["mediapipe", "gvhmr"], default="mediapipe",
-                   help="mediapipe: 로컬 CPU (기본) / gvhmr: 클라우드 GPU에서 만든 결과(npz) 변환")
+    p.add_argument("--engine", choices=["rtm", "mediapipe", "gvhmr"], default="rtm",
+                   help="rtm: RTMW3D, 그래픽카드(DirectML·AMD 가능) 또는 CPU (기본, 안 되면 MediaPipe로 자동 전환) / "
+                        "mediapipe: 가벼운 CPU 인식 / gvhmr: 클라우드 GPU에서 만든 결과(npz) 변환")
     p.add_argument("--gvhmr-result", help="cloud/run_gvhmr.sh 가 만든 .npz (engine=gvhmr)")
     p.add_argument("--model", choices=["lite", "full", "heavy"], default="heavy", help="MediaPipe 모델 크기")
     p.add_argument("--person", type=int, help="여러 명일 때 대상 (첫 장면 기준 왼쪽부터 0,1,2…). 기본: 가장 큰 사람")
@@ -79,7 +80,7 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def run_mediapipe(args, video):
+def run_video(args, video):
     from dancer_pipeline.lift import lift
     from dancer_pipeline.pose_mediapipe import estimate
     from dancer_pipeline.video import read_frames
@@ -87,13 +88,28 @@ def run_mediapipe(args, video):
     frames = read_frames(video, args.start, args.end, args.fps)
     _, info = next(frames)
     fps, total = info["fps"], info["total"]
-    progress.stage("model", 0, "MediaPipe 모델 준비")
-    from dancer_pipeline.pose_mediapipe import model_path
+    on_frame = lambda i: progress.stage("pose", i / total)  # noqa: E731
+    engine = "mediapipe"
+    if args.engine == "rtm":
+        progress.stage("model", 0, "RTMW3D 모델 준비 (그래픽카드 사용)")
+        try:
+            from dancer_pipeline import pose_rtm
 
-    model_path(args.model, log)
-    progress.stage("pose", 0, f"동작 인식 중 ({total} 프레임)")
-    kp, kp2d, valid = estimate(frames, fps, variant=args.model, person=args.person, log=log,
-                               on_frame=lambda i: progress.stage("pose", i / total))
+            models = pose_rtm.load_models(pose_rtm.pick_device(log), log)
+            engine = "rtm"
+        except Exception as e:  # missing package, download blocked, GPU driver problem...
+            log(f"RTMW3D를 쓸 수 없어 MediaPipe로 진행합니다 ({type(e).__name__}: {e})")
+    if engine == "rtm":
+        progress.stage("pose", 0, f"동작 인식 중 · RTMW3D ({total} 프레임)")
+        kp, kp2d, valid = pose_rtm.estimate(frames, fps, person=args.person, log=log, on_frame=on_frame, models=models)
+    else:
+        progress.stage("model", 0, "MediaPipe 모델 준비")
+        from dancer_pipeline.pose_mediapipe import model_path
+
+        model_path(args.model, log)
+        progress.stage("pose", 0, f"동작 인식 중 · MediaPipe ({total} 프레임)")
+        kp, kp2d, valid = estimate(frames, fps, variant=args.model, person=args.person, log=log, on_frame=on_frame)
+    args.engine_used = engine
     n = len(valid)
     if n < 2:
         raise SystemExit("처리할 프레임이 없습니다 (시간 범위를 확인하세요)")
@@ -105,9 +121,10 @@ def run_mediapipe(args, video):
     kp = {k: post.fill_gaps(v, valid) for k, v in kp.items()}
     kp2d = {k: post.fill_gaps(v, valid) for k, v in kp2d.items()}
     raw = {**{f"w_{k}": v for k, v in kp.items()}, **{f"i_{k}": v for k, v in kp2d.items()}, "fps": fps}
-    if not args.no_lift:
+    if not args.no_lift and engine == "mediapipe":  # RTMW3D depth is already consistent (calibrated)
         kp = lift(kp, kp2d, fps)
-    kp = post.align_gravity(kp)
+    # MediaPipe world landmarks lean systematically: always straighten. RTMW3D: only a clearly tilted camera.
+    kp = post.align_gravity(kp, min_deg=0 if engine == "mediapipe" else 12)
     if args.mirror:
         kp = mirror_keypoints(kp)
     sigma = 1.5 * args.smooth * fps / 30
@@ -129,6 +146,41 @@ def run_mediapipe(args, video):
     if args.save_keypoints:
         extra["keypoints"] = raw
     return fps, local, root, extra
+
+
+def run_bvh(args, path):
+    """Motion capture file from another tool (Rokoko Vision, Plask, DeepMotion, QuickMagic, ...)."""
+    from dancer_pipeline.bvh import load_bvh
+
+    progress.stage("model", 0, "BVH 읽는 중")
+    try:
+        fps, local, root, warnings = load_bvh(path)
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    for w in warnings:
+        log("주의: " + w)
+    a = int(round((args.start or 0) * fps))
+    b = int(round(args.end * fps)) + 1 if args.end is not None else len(root)
+    local = {k: v[a:b] for k, v in local.items()}
+    root = root[a:b]
+    if args.mirror:
+        local = mirror_rotations(local)
+        root = root @ MIRROR
+    progress.stage("post", 0, "다듬는 중")
+    local = post.smooth_rotations(local, 0.5 * args.smooth * fps / 30)
+    n = len(root)
+    hips_y = post.gaussian_smooth(post.ground_trajectory(local, root[:, 1]), 0.3 * args.smooth * fps / 30)
+    if args.root == "original":
+        xz = root[:, [0, 2]] - root[:, [0, 2]].mean(axis=0)
+        xz = args.range * np.tanh(xz / max(args.range, 1e-6)) if args.range > 0 else xz
+    elif args.root == "planted":
+        xz = post.planted_root_xz(local, hips_y, fps, args.range)
+    else:
+        xz = np.zeros((n, 2))
+    root = post.compose_root(xz, hips_y)
+    if not args.no_foot_lock:
+        local = post.foot_lock(local, root, fps)
+    return fps, local, root, {"warnings": warnings}
 
 
 def run_gvhmr(args):
@@ -196,13 +248,15 @@ def _main(args):
     if args.download_only:
         progress.done(video=str(video))
         return video
-    if args.engine == "mediapipe" and not video.exists():
+    if args.engine != "gvhmr" and not Path(video).exists():
         raise SystemExit(f"파일이 없습니다: {video}")
 
-    if args.engine == "gvhmr":
+    if str(video).lower().endswith(".bvh"):
+        fps, local, root, extra = run_bvh(args, video)
+    elif args.engine == "gvhmr":
         fps, local, root, extra = run_gvhmr(args)
     else:
-        fps, local, root, extra = run_mediapipe(args, video)
+        fps, local, root, extra = run_video(args, video)
 
     if args.loop:
         local, root, n = post.make_loop(local, root, fps)
@@ -225,7 +279,7 @@ def _main(args):
         "source": source,
         "start": args.start,
         "end": args.end,
-        "engine": args.engine,
+        "engine": getattr(args, "engine_used", args.engine),
         "created": dt.datetime.now().isoformat(timespec="seconds"),
         "fps": round(fps, 3),
         "frames": n,

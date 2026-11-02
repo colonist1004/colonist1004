@@ -6,34 +6,41 @@
 춤 영상에서 동작을 뽑아 VRMA 파일로 저장합니다.
 결과는 앱의 모션 라이브러리(`%APPDATA%\desktop-dancer\library\motions`)에 바로 저장되어 트레이 메뉴 **춤**에 자동으로 나타납니다.
 
-엔진은 두 가지 중에서 고릅니다.
+입력은 세 가지 중 하나입니다.
 
-| 엔진 | 실행 위치 | 품질 | 라이선스 |
+| 입력 / 엔진 | 실행 위치 | 품질 | 라이선스 |
 |---|---|---|---|
-| **MediaPipe** (기본) | 내 PC CPU. AMD GPU라도 상관없음 | 보통. 후처리로 보완 | Apache 2.0 (상업 이용 가능) |
-| **GVHMR** | 클라우드 NVIDIA GPU (RunPod, Colab 등) | 높음. 전역 이동과 점프까지 복원 | **비상업 전용** (GVHMR, SMPL-X 둘 다) |
+| **RTMW3D** (`--engine rtm`, 기본) | 내 PC. ONNX Runtime이 Windows에서는 DirectML(AMD·인텔·NVIDIA), 그 밖에는 CPU를 씁니다 | 좋음. 133개 키포인트와 깊이 | Apache 2.0 |
+| **MediaPipe** (`--engine mediapipe`) | 내 PC CPU | 보통 | Apache 2.0 |
+| **BVH 파일** (`.bvh` 를 입력으로) | 외부 서비스에서 처리 | 서비스에 따라 다름 (대체로 가장 좋음) | 서비스 약관을 따름 |
+| **GVHMR** (`--engine gvhmr`) | 클라우드 NVIDIA GPU | 높음. 전역 이동까지 복원 | **비상업 전용** |
 
-## 설치 (Windows, MediaPipe)
+RTMW3D 모델을 쓸 수 없으면 자동으로 MediaPipe로 진행합니다. 예를 들어 다운로드가 막혔거나 그래픽카드 드라이버에 문제가 있을 때입니다.
 
-Python 3.10~3.12가 필요합니다.
+### 다른 모캡 서비스의 BVH
 
-```bash
-cd desktop-dancer\pipeline
-```
-
-```bash
-python -m venv .venv
-```
+웹 모캡 서비스에서 받은 BVH를 바로 변환할 수 있습니다. 대상은 Rokoko Vision(카메라 1대 무료), Plask, DeepMotion, QuickMagic 등입니다.
 
 ```bash
-.venv\Scripts\activate
+python extract_dance.py 춤.bvh --loop
 ```
+
+- 뼈 이름은 Mixamo, Rokoko, UE, CMU 계열을 자동으로 맞춥니다.
+- 단위(cm/m), 위쪽 축(Y/Z), 바라보는 방향, A포즈로 된 기본 자세도 자동으로 보정합니다.
+
+## 설치
+
+앱의 **설치 시작** 버튼이 아래 과정을 자동으로 합니다. uv가 Python 3.12를 직접 내려받으므로 시스템 Python이 필요 없습니다. 명령줄로 직접 하려면 아래 순서로 실행합니다. Python 3.10~3.12가 필요합니다.
 
 ```bash
 pip install -r requirements.txt
 ```
 
-첫 실행 때 MediaPipe 모델(약 30MB)을 자동으로 내려받습니다.
+```bash
+pip install --no-deps -r requirements-nodeps.txt
+```
+
+두 번째 줄은 rtmlib를 설치합니다. rtmlib는 onnxruntime과 opencv-contrib를 강제로 설치하는데, 이것이 DirectML용 onnxruntime과 충돌하기 때문에 의존성 없이 따로 설치합니다.
 
 ## 사용법
 
@@ -60,7 +67,7 @@ python extract_dance.py "https://www.youtube.com/watch?v=..." --start 5 --end 25
 | `--mirror` | 좌우 반전. 거울 모드 안무 영상에 사용 |
 | `--person 1` | 여러 명이 나올 때 대상 지정 (첫 장면 기준 왼쪽부터 0, 1, 2…). 기본은 가장 크게 보이는 사람 |
 | `--smooth 2` | 떨림 제거를 더 강하게 (0이면 끔) |
-| `--model full` | MediaPipe 모델을 가벼운 것으로 바꿔 속도를 높임 (`lite`/`full`/`heavy`) |
+| `--engine mediapipe --model full` | 가벼운 MediaPipe로 빠르게 (`lite`/`full`/`heavy`) |
 | `--out 폴더/파일.vrma` | 저장 위치 지정 |
 
 출력은 `<이름>.vrma` 와 `<이름>.json`(원본 출처, 구간, 옵션 메타데이터) 두 파일입니다.
@@ -171,7 +178,34 @@ python check_image.py 캐릭터.png
 
 첫 실행은 TRELLIS와 UniRig 설치 때문에 20~30분, 이후에는 캐릭터당 3~5분 걸립니다. 결과로 `캐릭터.vrm`(바로 사용 가능)과 `캐릭터.rigged.glb` 가 생깁니다. 뼈대가 사람 형태로 인식되지 않으면 UniRig 뼈대를 다른 seed로 최대 4번 다시 만듭니다.
 
-## 3. VRM 변환 (`make_character.py`, numpy만 필요)
+## 3. VRM 변환 (`make_character.py`)
+
+뼈대가 **있는** GLB는 그 뼈대를 그대로 씁니다(UniRig 결과 등). 뼈대가 **없는** GLB는 내 PC에서 자동으로 리깅합니다. Tripo나 Meshy 같은 웹 생성기 결과, TRELLIS 결과 등이 여기에 해당합니다. 그래픽카드와 상관없이 CPU만 씁니다.
+
+자동 리깅 순서는 아래와 같습니다.
+
+1. **자세 찾기**: 메시를 15°마다 돌려 가며 렌더링하고, 각 장면에서 MediaPipe로 사람 자세를 찾습니다.
+2. **정면 고르기**: 얼굴이 보이고 어깨가 가장 넓게 보이는 장면을 정면으로 고릅니다.
+3. **관절 위치 정하기**: 그 장면의 2D 관절 위치에, 메시에서 잰 깊이를 더해 3D 관절을 만듭니다.
+4. **스키닝 웨이트 계산**
+   - 먼저 각 정점을 가장 가까운 뼈에 붙입니다. 거리는 팔다리 굵기로 나눈 값을 씁니다.
+   - 팔은 자기 축 가까이나 어깨 바깥쪽 정점만 가져갑니다. 그래서 겨드랑이 옷자락, 긴 머리, 옆의 소품은 팔에 붙지 않습니다.
+   - 마지막으로 열 확산(heat diffusion) 방식으로 관절 주변을 부드럽게 섞습니다.
+5. **자세 인식 실패 시**: MediaPipe가 사람을 못 찾으면 몸 모양으로 뼈대를 추정합니다(다리가 갈라지는 높이, 목이 가장 가는 곳 등).
+
+```bash
+python make_character.py 모델.glb --name 내캐릭터
+```
+
+들어 있는 뼈대가 이상하면 `--autorig` 를 붙여 새로 만듭니다.
+
+Seed-san을 A포즈로 바꾸고 뼈대를 지운 모델로 시험한 결과는 아래와 같습니다.
+
+- 관절 위치 오차는 평균 약 5cm(키 160cm 기준)이고, 앞뒤와 좌우는 정확했습니다.
+- 팔을 수평에 가깝게 벌린 모델은 T포즈 보정 후 결과가 깔끔합니다.
+- 팔이 거의 수직으로 내려간 모델은 T포즈로 펼 때 헐렁한 옷의 겨드랑이 부분이 늘어납니다.
+
+### (뼈대가 있는 GLB) 뼈 찾기 방식
 
 ```bash
 python make_character.py 캐릭터.rigged.glb --name 내캐릭터 --height 1.6

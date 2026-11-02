@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Rigged character (GLB, e.g. TRELLIS + UniRig output) -> VRM 1.0 avatar for Desktop Dancer.
+"""Character mesh (GLB) -> VRM 1.0 avatar for Desktop Dancer.
+
+Rigged GLBs (e.g. UniRig output) keep their skeleton; plain meshes (TRELLIS, web generators, ...)
+are rigged locally on the CPU, so no NVIDIA GPU is needed.
 
   python make_character.py rigged.glb --name 내캐릭터
   python make_character.py rigged.glb --flip            # if it ends up facing backwards
@@ -14,6 +17,8 @@ import datetime as dt
 import json
 import sys
 from pathlib import Path
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -38,13 +43,14 @@ MTOON = {
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="리깅된 GLB → VRM 캐릭터 (Desktop Dancer)")
-    p.add_argument("input", help="리깅된 .glb (UniRig merge 결과 등)")
+    p.add_argument("input", help="캐릭터 .glb (리깅된 것도, 뼈대 없는 메시도 됨)")
     p.add_argument("--name", help="캐릭터 이름 (기본: 파일 이름)")
     p.add_argument("--out", help="출력 .vrm 경로 또는 폴더 (기본: 앱 캐릭터 라이브러리)")
     p.add_argument("--height", type=float, default=1.6, help="키 (m, 기본 1.6)")
     p.add_argument("--flip", action="store_true", help="앞뒤 반대로 (결과가 뒤돌아 있을 때)")
     p.add_argument("--no-tpose", action="store_true", help="T포즈로 펴지 않음")
     p.add_argument("--shading", choices=["toon", "soft"], default="toon", help="toon: 애니풍(외곽선 포함) / soft: 부드러운 음영")
+    p.add_argument("--autorig", action="store_true", help="기존 뼈대를 무시하고 내 PC에서 자동 리깅 (뼈대 없는 GLB는 항상 자동)")
     p.add_argument("--author", default="Desktop Dancer user")
     p.add_argument("--progress-json", action="store_true")
     return p.parse_args(argv)
@@ -78,8 +84,17 @@ def _main(a, pr):
     tris = sum(len(p.indices) // 3 for p in model.prims)
     pr.log(f"{len(model.joint_names)} bones, {tris} triangles, {len(model.images)} textures")
 
-    pr.stage("map", 0, "뼈대 분석 중 (머리·팔·다리 찾기)")
-    mapping = find_humanoid(model)
+    autorigged = bool(a.autorig or model.extras.get("unrigged"))
+    if autorigged:
+        from dancer_pipeline.char.autorig import autorig
+        from dancer_pipeline.char.humanoid import Mapping
+
+        pr.stage("map", 0, "뼈대 넣는 중 (내 PC에서 자동 리깅)")
+        model, bones, _, _ = autorig(model, log=pr.log)
+        mapping = Mapping(bones, np.array([0.0, 0.0, 1.0]), [])
+    else:
+        pr.stage("map", 0, "뼈대 분석 중 (머리·팔·다리 찾기)")
+        mapping = find_humanoid(model)
     for w in mapping.warnings:
         pr.log("주의: " + w)
 
@@ -118,7 +133,8 @@ def _main(a, pr):
         "bones": {k: model.joint_names[v] for k, v in mapping.bones.items()},
         "triangles": tris,
         "warnings": mapping.warnings,
-        "options": {"height": a.height, "flip": a.flip, "tpose": not a.no_tpose, "shading": a.shading},
+        "options": {"height": a.height, "flip": a.flip, "tpose": not a.no_tpose, "shading": a.shading,
+                    "autorig": autorigged},
     }
     out.with_suffix(".json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
     pr.log(f"saved {out}")

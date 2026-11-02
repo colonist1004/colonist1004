@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('studio', {
   setup: () => ipcRenderer.invoke('studio:setup'),
   onSetupLog: (cb) => subscribe('studio:setup-log', cb),
   openPythonDownload: () => ipcRenderer.invoke('studio:open-python'),
+  openLink: (url) => ipcRenderer.invoke('studio:open-link', url),
   pathForFile: (file) => webUtils.getPathForFile(file),
   download: (url) => ipcRenderer.invoke('studio:download', url),
   readVideo: (p) => ipcRenderer.invoke('studio:read-video', p),

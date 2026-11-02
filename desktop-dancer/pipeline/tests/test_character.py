@@ -34,10 +34,11 @@ EXTRA = {
 }
 
 
-def synthetic_model():
-    names = BONES + list(EXTRA)
-    parent = {**PARENT, **{k: v[0] for k, v in EXTRA.items()}}
-    pos = {**REST_POS, **{k: np.array(v[1], float) for k, v in EXTRA.items()}}
+def synthetic_model(prop=True):
+    extra = {k: v for k, v in EXTRA.items() if prop or not k.startswith("prop")}
+    names = BONES + list(extra)
+    parent = {**PARENT, **{k: v[0] for k, v in extra.items()}}
+    pos = {**REST_POS, **{k: np.array(v[1], float) for k, v in extra.items()}}
     idx = {n: i for i, n in enumerate(names)}
     world = np.stack([np.eye(4) for _ in names])
     for n in names:
@@ -50,6 +51,10 @@ def synthetic_model():
             a, b = pos[n], e
             c = (a + b) / 2
             half = np.maximum(np.abs(b - a) / 2, 0.03)
+            if n == "head":
+                half = np.maximum(half, 0.09)  # a head is wider than the neck
+            if n in ("hips", "spine", "chest"):
+                half = np.maximum(half, [0.13, 0.0, 0.08])  # and the torso is wider than both
             base = len(prims_pos)
             for sx in (-1, 1):
                 for sy in (-1, 1):
@@ -68,8 +73,8 @@ def synthetic_model():
     return Model(names, [idx[parent[n]] if parent[n] else -1 for n in names], world, [prim], [], []), idx
 
 
-def make_fixture(yaw_deg, arm_down_deg=40):
-    m, idx = synthetic_model()
+def make_fixture(yaw_deg, arm_down_deg=40, prop=True):
+    m, idx = synthetic_model(prop)
     d = np.radians(arm_down_deg)
     m = pose_and_bake(m, {idx["leftUpperArm"]: axis_angle_to_matrix(np.array([0, 0, -d])),
                           idx["rightUpperArm"]: axis_angle_to_matrix(np.array([0, 0, d]))})
@@ -129,6 +134,32 @@ def test_cli_make_character():
         out = make_character.main([str(src), "--name", "x", "--out", str(Path(d) / "x.vrm")])
         info = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
         assert out.exists() and info["bones"]["hips"]
+
+
+def test_autorig_unrigged_mesh():
+    """A plain mesh (no skeleton) is rigged locally. Without MediaPipe (numpy-only CI) this uses the
+    geometric fit; with MediaPipe installed it uses the multi-view pose detection."""
+    import make_character
+    from dancer_pipeline.char.autorig import autorig
+
+    # (no one-sided prop here: the geometric fallback cannot see past a prop crossing the neck;
+    #  the MediaPipe multi-view path handles that case, see tests/make_char_fixture.py --unrigged)
+    m, truth = make_fixture(-70, arm_down_deg=20, prop=False)
+    idx = {v: k for k, v in enumerate(m.joint_names)}
+    true_pos = {b: m.joint_world[idx[truth[b]]][:3, 3] for b in ("hips", "head", "leftHand", "rightFoot", "leftLowerLeg", "rightUpperArm")}
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "mesh.glb"
+        write_glb(m, src, skinned=False)
+        plain = read_glb(src)
+        assert plain.extras.get("unrigged")
+        rm, bones, J, (R, shift) = autorig(plain)
+        H = np.ptp(np.concatenate([p.positions for p in plain.prims])[:, 1])
+        for b, p in true_pos.items():
+            err = np.linalg.norm(R @ p - shift - J[b]) / H
+            assert err < 0.08, f"{b}: {err:.3f} H"
+        out = make_character.main([str(src), "--name", "plain", "--out", str(Path(d) / "plain.vrm")])
+        info = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+        assert info["options"]["autorig"] and info["bones"]["leftHand"] == "leftHand"
 
 
 if __name__ == "__main__":

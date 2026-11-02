@@ -64,12 +64,15 @@ def smooth_rotations(local: dict, sigma: float) -> dict:
 
 # --------------------------------------------------------------- alignment
 
-def align_gravity(kp: dict) -> dict:
-    """Tilt keypoints so that the clip-average torso direction points straight up.
-    Corrects a camera that looks up/down or is rolled. Keeps the camera-relative facing."""
+def align_gravity(kp: dict, min_deg: float = 12.0) -> dict:
+    """Tilt keypoints so that the clip-average torso direction points straight up, when the tilt is
+    large enough to come from a tilted camera (dancers lean a little on purpose; that is kept).
+    Keeps the camera-relative facing."""
     hip = (kp["left_hip"] + kp["right_hip"]) / 2
     sh = (kp["left_shoulder"] + kp["right_shoulder"]) / 2
     up = normalize(normalize(sh - hip).mean(axis=0))
+    if np.degrees(np.arccos(np.clip(up[1], -1, 1))) < min_deg:
+        return kp
     R = rotation_between(up, np.array([0.0, 1.0, 0.0]))
     return {k: v @ R.T for k, v in kp.items()}
 

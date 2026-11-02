@@ -71,6 +71,7 @@ def main():
     ap.add_argument("--core-only", action="store_true",
                     help="keep only main body bones (like a simple auto-rig); others' weights go to the kept ancestor")
     ap.add_argument("--no-neck", action="store_true", help="also drop neck/upperChest/shoulders/toes")
+    ap.add_argument("--unrigged", action="store_true", help="write only the mesh (like TRELLIS output), plus truth joint positions")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -112,6 +113,10 @@ def main():
     truth = {b: m.joint_names[idx[n]] for b, n in truth_names.items() if n in idx}
     if a.core_only:
         truth = {b: v for b, v in truth.items() if b in CORE}
+    if a.unrigged:
+        write_glb(m, out / "mesh.glb", skinned=False)
+        pos = {b: m.joint_world[idx[n]][:3, 3].tolist() for b, n in truth_names.items() if n in idx}
+        (out / "truth_pos.json").write_text(json.dumps(pos, indent=1))
     write_glb(m, out / "rigged.glb")
     (out / "truth.json").write_text(json.dumps(truth, indent=1))
     print(f"wrote {out/'rigged.glb'} ({len(old)} joints, yaw {a.yaw}, scale {s:.3f}); hips at {joint_pos(m, idx[truth_names['hips']]).round(3)}")

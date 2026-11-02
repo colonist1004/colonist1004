@@ -12,6 +12,18 @@ def is_url(s: str) -> bool:
     return bool(re.match(r"^https?://", s))
 
 
+def _find_deno():
+    import shutil
+    import sys
+
+    exe = "deno.exe" if sys.platform == "win32" else "deno"
+    for d in (Path(sys.executable).parent, Path(sys.prefix) / ("Scripts" if sys.platform == "win32" else "bin")):
+        if (d / exe).exists():
+            return d / exe
+    found = shutil.which("deno")
+    return Path(found) if found else None
+
+
 def download(url: str, log=print, on_progress=None) -> Path:
     """Download a video URL with yt-dlp into the cache (reused on later runs).
     Only for videos you are allowed to download; YouTube's terms restrict downloading."""
@@ -22,18 +34,33 @@ def download(url: str, log=print, on_progress=None) -> Path:
     out_dir = cache_dir() / "videos"
     out_dir.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha1(url.encode()).hexdigest()[:12]
-    existing = sorted(out_dir.glob(f"{key}.*"))
+    # Only finished videos count as cached; leftovers of a failed attempt (.part, .ytdl, f137.mp4…) do not.
+    existing = sorted(p for p in out_dir.glob(f"{key}.*")
+                      if p.suffix.lower() in (".mp4", ".webm", ".mkv", ".mov") and p.stem == key)
+    for junk in out_dir.glob(f"{key}.*"):
+        if junk not in existing:
+            junk.unlink(missing_ok=True)
     if existing:
         log(f"cached download: {existing[0]}")
         return existing[0]
     opts = {
-        # A single progressive file avoids needing ffmpeg for merging; 720p is plenty for pose.
-        "format": "b[height<=720][ext=mp4]/b[height<=720]/b",
+        # Pose detection needs no audio. Video-only streams always exist (YouTube rarely offers
+        # combined 720p files any more) and need no ffmpeg merge. Prefer H.264: OpenCV and the
+        # app's preview decode it everywhere.
+        "format": ("bv*[height<=720][vcodec^=avc1]/bv*[height<=720][ext=mp4]/bv*[height<=720]"
+                   "/b[height<=720]/bv*/b"),
         "outtmpl": str(out_dir / f"{key}.%(ext)s"),
         "quiet": True,
         "noprogress": True,
         "noplaylist": True,
     }
+    # YouTube needs a JavaScript runtime to solve its player challenges (yt-dlp >= 2025.11).
+    # requirements.txt installs `deno` into the same environment; point yt-dlp at it.
+    deno = _find_deno()
+    if deno:
+        opts["js_runtimes"] = {"deno": {"path": str(deno)}}
+    else:
+        log("주의: deno(자바스크립트 런타임)를 찾지 못했습니다. 유튜브 내려받기가 실패할 수 있습니다.")
     if on_progress:
         def hook(d):
             total = d.get("total_bytes") or d.get("total_bytes_estimate")

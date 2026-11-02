@@ -20,4 +20,8 @@ contextBridge.exposeInMainWorld('charStudio', {
   readSampleMotion: () => ipcRenderer.invoke('char:read-sample-motion'),
   openCloudFolder: () => ipcRenderer.invoke('char:open-cloud-folder'),
   apply: (p) => ipcRenderer.invoke('char:apply', p),
+  listCharacters: () => ipcRenderer.invoke('char:list'),
+  getCustom: (p) => ipcRenderer.invoke('custom:get', p),
+  setCustom: (p, c) => ipcRenderer.invoke('custom:set', p, c),
+  openLink: (url) => ipcRenderer.invoke('studio:open-link', url),
 });

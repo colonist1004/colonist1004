@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { applyCustomization } from './customize.js';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 
 const api = window.dancer;
@@ -97,6 +98,8 @@ function applyMotion() {
   mixer.timeScale = settings.speed;
 }
 
+let currentCharacter = null;
+
 async function load({ character, motion }) {
   const token = ++loadToken;
   showMessage('');
@@ -127,6 +130,8 @@ async function load({ character, motion }) {
       }
       scene.add(vrm.scene);
       vrm.update(0);
+      applyCustomization(vrm, await api.getCustom(character));
+      currentCharacter = character;
       frameCharacter();
       applyMotion();
     }
@@ -249,6 +254,11 @@ function tick() {
 // ---------------------------------------------------------------- startup
 
 api.onLoad(load);
+api.onCustom(({ character, custom }) => {
+  if (!vrm || character !== currentCharacter) return;
+  applyCustomization(vrm, custom);
+  frameCharacter();
+});
 api.onSettings((s) => {
   settings = s;
   if (mixer) mixer.timeScale = s.speed;

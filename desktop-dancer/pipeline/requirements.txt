@@ -1,4 +1,10 @@
 numpy>=1.24
 opencv-python>=4.8
 mediapipe>=0.10.14
-yt-dlp>=2024.1.0
+# YouTube: yt-dlp needs yt-dlp-ejs (in [default]) and a JavaScript runtime (deno) since 2025.11
+yt-dlp[default]>=2025.11.12
+deno>=2.0
+# RTMW3D engine: ONNX Runtime with DirectML on Windows (any GPU incl. AMD), CPU elsewhere
+onnxruntime-directml>=1.18; sys_platform == "win32"
+onnxruntime>=1.18; sys_platform != "win32"
+tqdm

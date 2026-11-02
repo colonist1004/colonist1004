@@ -366,6 +366,38 @@ ipcMain.handle('read-asset', (_e, file) => {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 });
 
+// ------------------------------------------------- character tweaks (sliders)
+
+/** Tweaks live in the user library (bundled characters are read-only in the packaged app). */
+function customPath(vrmFile) {
+  return path.join(userLibrary(), 'characters', `${path.basename(vrmFile, path.extname(vrmFile))}.custom.json`);
+}
+
+function readCustom(vrmFile) {
+  try {
+    return JSON.parse(fs.readFileSync(customPath(vrmFile), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+ipcMain.handle('custom:get', (_e, file) => (typeof file === 'string' && isLibraryFile(file) ? readCustom(file) : null));
+
+ipcMain.handle('custom:set', (_e, file, custom) => {
+  if (typeof file !== 'string' || !isLibraryFile(file) || typeof custom !== 'object' || custom === null) return false;
+  const num = (v, lo, hi) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : 1);
+  const clean = {
+    height: num(custom.height, 0.5, 2), head: num(custom.head, 0.5, 2), arms: num(custom.arms, 0.5, 2),
+    legs: num(custom.legs, 0.5, 2), shoulders: num(custom.shoulders, 0.5, 2), brightness: num(custom.brightness, 0.2, 3),
+    colors: Object.fromEntries(Object.entries(custom.colors || {})
+      .filter(([k, v]) => typeof k === 'string' && k.length < 200 && /^#[0-9a-f]{6}$/i.test(v)).slice(0, 64)),
+  };
+  ensureUserLibrary();
+  fs.writeFileSync(customPath(file), JSON.stringify(clean, null, 2));
+  win?.webContents.send('custom-updated', { character: file, custom: clean });
+  return true;
+});
+
 ipcMain.handle('get-initial', () => {
   const s = settings.get();
   return {
@@ -459,6 +491,18 @@ ipcMain.handle('studio:setup', async () => {
 });
 
 ipcMain.handle('studio:open-python', () => shell.openExternal('https://www.python.org/downloads/windows/'));
+
+// Only these pages can be opened from the windows (the renderer cannot open arbitrary URLs).
+const LINKS = new Set([
+  'https://www.rokoko.com/products/vision',
+  'https://plask.ai',
+  'https://www.deepmotion.com/animate-3d',
+  'https://www.quickmagic.ai',
+  'https://vroid.com/en/studio',
+  'https://www.tripo3d.ai',
+  'https://www.meshy.ai',
+]);
+ipcMain.handle('studio:open-link', (_e, url) => (LINKS.has(url) ? shell.openExternal(url) : false));
 
 ipcMain.handle('studio:download', (_e, url) => {
   if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return { type: 'error', msg: '주소가 올바르지 않습니다' };
@@ -601,6 +645,11 @@ ipcMain.handle('char:read-library-file', (_e, file) => {
 ipcMain.handle('char:read-sample-motion', () => {
   const buf = fs.readFileSync(path.join(bundledAssets(), 'motions', 'sample-dance.vrma'));
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+});
+
+ipcMain.handle('char:list', () => {
+  const current = resolveAsset('characters', '.vrm', settings.get().character);
+  return listLibrary('characters', '.vrm').map((p) => ({ path: p, name: path.basename(p, '.vrm'), current: p === current }));
 });
 
 ipcMain.handle('char:open-cloud-folder', () => shell.openPath(runner.pipelineDir()));

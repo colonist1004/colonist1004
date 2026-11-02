@@ -8,7 +8,8 @@ const state = {
   start: 0,
   end: 0,
   root: 'planted',
-  model: 'heavy',
+  model: 'rtm',
+  bvh: false,
   gvhmr: null,
   result: null,
   running: false,
@@ -97,6 +98,8 @@ function loadVideo(src, input, name) {
   if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
   state.objectUrl = src;
   state.input = input;
+  state.bvh = false;
+  show('bvh-box', false);
   video.src = src;
   show('video-box', true);
   if (!$('name').value || $('name').dataset.auto === '1') {
@@ -111,6 +114,23 @@ function useFile(file) {
   if (!file) return;
   const p = api.pathForFile(file);
   if (!p) return showError('이 파일의 경로를 알 수 없습니다. 다른 방법으로 선택해 보세요.');
+  if (/\.bvh$/i.test(file.name)) {
+    // Motion capture file from another tool: no video, no range, convert as is.
+    video.removeAttribute('src');
+    show('video-box', false);
+    state.input = p;
+    state.bvh = true;
+    state.duration = 0;
+    $('bvh-text').textContent = `BVH 모션 파일: ${file.name}`;
+    show('bvh-box', true);
+    if (!$('name').value || $('name').dataset.auto === '1') {
+      $('name').value = file.name.replace(/\.[^.]+$/, '');
+      $('name').dataset.auto = '1';
+    }
+    hideOutcome();
+    updateRunButton();
+    return;
+  }
   loadVideo(URL.createObjectURL(file), p, file.name.replace(/\.[^.]+$/, ''));
 }
 
@@ -234,7 +254,7 @@ $('btn-gvhmr-clear').onclick = () => {
 // ---------------------------------------------------------------------- run
 
 function updateRunButton() {
-  const hasVideo = !!state.input && state.end > state.start;
+  const hasVideo = !!state.input && (state.bvh || state.end > state.start);
   $('btn-run').disabled = state.running || !(hasVideo || state.gvhmr);
 }
 
@@ -275,7 +295,7 @@ $('btn-run').onclick = async () => {
     smooth: Number($('smooth').value),
     model: state.model,
     person: $('person').value === '' ? null : Number($('person').value),
-    engine: state.gvhmr ? 'gvhmr' : 'mediapipe',
+    engine: state.gvhmr ? 'gvhmr' : state.model === 'rtm' ? 'rtm' : 'mediapipe',
     gvhmrResult: state.gvhmr,
   };
   if (state.input && state.duration) {
@@ -299,6 +319,7 @@ $('btn-run').onclick = async () => {
 };
 
 $('btn-cancel').onclick = () => api.cancel();
+for (const b of document.querySelectorAll('[data-link]')) b.onclick = () => api.openLink(b.dataset.link);
 $('btn-apply').onclick = async () => {
   await api.apply(state.result);
   $('btn-apply').textContent = '적용했어요 ✓';

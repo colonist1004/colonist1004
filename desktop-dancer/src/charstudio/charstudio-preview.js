@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+import { DEFAULTS, SLIDERS, applyCustomization, listMaterials } from '../renderer/customize.js';
 
 const api = window.charStudio;
 const canvas = document.getElementById('preview');
@@ -23,6 +24,8 @@ loader.register((p) => new VRMLoaderPlugin(p));
 loader.register((p) => new VRMAnimationLoaderPlugin(p));
 
 let vrm = null;
+let currentFile = null;
+let custom = { ...DEFAULTS, colors: {} };
 let mixer = null;
 let dancing = false;
 let danceClip = null;
@@ -60,6 +63,10 @@ async function load(file) {
   turntable.add(vrm.scene);
   turntable.rotation.y = 0;
   vrm.update(0);
+  currentFile = file;
+  custom = { ...DEFAULTS, colors: {}, ...((await api.getCustom(file)) || {}) };
+  applyCustomization(vrm, custom);
+  buildTweakUI();
   const box = new THREE.Box3().setFromObject(vrm.scene);
   const h = box.max.y - box.min.y;
   floor.scale.setScalar(h / 1.6);
@@ -99,4 +106,51 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-window.preview = { load, toggleDance };
+// ------------------------------------------------------------ tweak UI
+function buildTweakUI() {
+  const box = document.getElementById('sliders');
+  box.innerHTML = '';
+  for (const sl of SLIDERS) {
+    const label = document.createElement('label');
+    label.textContent = sl.label;
+    const wrap = document.createElement('div');
+    wrap.className = 'slider';
+    const input = Object.assign(document.createElement('input'), { type: 'range', min: sl.min, max: sl.max, step: sl.step });
+    input.value = custom[sl.key];
+    input.dataset.key = sl.key;
+    const val = document.createElement('span');
+    val.textContent = `${Math.round(custom[sl.key] * 100)}%`;
+    input.addEventListener('input', () => {
+      custom[sl.key] = Number(input.value);
+      val.textContent = `${Math.round(custom[sl.key] * 100)}%`;
+      applyCustomization(vrm, custom);
+    });
+    wrap.append(input, val);
+    box.append(label, wrap);
+  }
+  const colors = document.getElementById('colors');
+  colors.innerHTML = '';
+  for (const name of [...listMaterials(vrm).keys()].slice(0, 40)) {
+    const label = document.createElement('label');
+    label.title = name;
+    const input = Object.assign(document.createElement('input'), { type: 'color', value: custom.colors[name] || '#ffffff' });
+    input.addEventListener('input', () => {
+      custom.colors[name] = input.value;
+      applyCustomization(vrm, custom);
+    });
+    label.append(input, document.createTextNode(name));
+    colors.appendChild(label);
+  }
+}
+
+function resetCustom() {
+  custom = { ...DEFAULTS, colors: {} };
+  if (vrm) applyCustomization(vrm, custom);
+  buildTweakUI();
+}
+
+async function saveCustom() {
+  if (currentFile) await api.setCustom(currentFile, custom);
+}
+
+window.charPreview = { load, toggleDance, resetCustom, saveCustom, getCustom: () => custom };

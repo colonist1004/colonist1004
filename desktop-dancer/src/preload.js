@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('dancer', {
   reportError: (msg) => ipcRenderer.send('renderer-error', String(msg)),
   devFrame: (i, dataUrl) => ipcRenderer.send('dev-frame', i, dataUrl),
   devRecordDone: () => ipcRenderer.send('dev-record-done'),
+  getCustom: (file) => ipcRenderer.invoke('custom:get', file),
+  onCustom: (cb) => ipcRenderer.on('custom-updated', (_e, v) => cb(v)),
   onLoad: (cb) => ipcRenderer.on('load', (_e, v) => cb(v)),
   onSettings: (cb) => ipcRenderer.on('settings', (_e, v) => cb(v)),
 });

@@ -21,8 +21,12 @@ jobs:
         run: pip install numpy
       - name: Retarget / SMPL / VRMA / loop round-trip tests
         run: python tests/test_roundtrip.py
-      - name: Character pipeline tests (bone mapping, T-pose, VRM)
+      - name: Character pipeline tests (bone mapping, T-pose, auto-rig, VRM)
         run: python tests/test_character.py
+      - name: BVH import tests
+        run: python tests/test_bvh.py
+      - name: RTMW3D conversion tests (depth sign/scale calibration)
+        run: python tests/test_rtm.py
 
   build:
     runs-on: windows-latest

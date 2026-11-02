@@ -17,7 +17,9 @@ This folder is separate from the photo editor at the repo root and has its own `
 - Coordinates follow VRM 1.0: +Y up, the body faces +Z, character left = +X.
 
 ## Studio ("춤 만들기" window)
-- `src/studio/` is the UI. `src/pipeline-runner.js` builds the venv in `userData/pipeline-env` from a system Python 3.9-3.13, then runs `extract_dance.py --progress-json`. The `@@{json}` lines carry progress, done, and error events.
+- `src/studio/` is the UI. `src/pipeline-runner.js` downloads **uv** into `userData/tools`. uv installs a managed Python 3.12 (`userData/python`) and the venv `userData/pipeline-env`, with `requirements.txt` plus `requirements-nodeps.txt` (rtmlib, installed with `--no-deps`). If uv fails, it falls back to a system Python. It then runs `extract_dance.py --progress-json`. The `@@{json}` lines carry progress, done, and error events.
+- Motion engines: `rtm` (RTMW3D via ONNX Runtime; DirectML on Windows; falls back to MediaPipe), `mediapipe`, and `.bvh` input (`dancer_pipeline/bvh.py`). The RTMW3D depth sign and scale are calibrated per clip in `pose_rtm.to_keypoints`.
+- YouTube needs `yt-dlp[default]` and `deno`. Both are in requirements, and `video.py` points yt-dlp at the deno binary in the venv.
 - The renderer never passes raw CLI arguments. `buildArgs()` validates the option object.
 - `DANCER_PYTHON=<python>` skips the setup. `DANCER_OPEN_STUDIO=1` opens the window at launch. E2E tests drive the window with Playwright `_electron`.
 - userData is pinned to `appData/desktop-dancer` in both dev and packaged builds. The pipeline gets it through `DANCER_DATA_DIR`.
@@ -26,6 +28,8 @@ This folder is separate from the photo editor at the repo root and has its own `
 - `char/gltf_read.py` flattens any rigged GLB into a world-space bind pose. `rig.py` handles posing and bake (LBS).
 - `char/humanoid.py` finds VRM bones from geometry. `normalize.py` handles facing +Z, T-pose, scale, and world-aligned joints.
 - `char/gltf_write.py` writes VRM 1.0 with MToon. It writes VRM directly, without Blender or UniVRM.
+- `char/autorig.py` rigs unrigged meshes on the CPU. It renders views with `char/render.py`, picks the front where MediaPipe finds a person, lifts the 2D joints to 3D with mesh depth, and computes heat-diffusion weights with arm gating. Without MediaPipe it falls back to the geometric `fit_skeleton`.
+- Slider tweaks live in `src/renderer/customize.js`. They are stored per character as `library/characters/<name>.custom.json` and applied at load in both the dancer and the preview. They never modify the VRM.
 - Preview any model with `node scripts/preview/preview.mjs model.vrm out.png [--motion m.vrma --t 1.5] [--skeleton]`. Set `NODE_PATH` to the global node_modules for playwright.
 
 ## Layout

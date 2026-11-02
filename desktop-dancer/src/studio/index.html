@@ -31,8 +31,9 @@
       </div>
       <div id="setup-ready" hidden>
         <p>
-          <span id="setup-python"></span> 을(를) 찾았습니다. 춤 인식 도구(MediaPipe 등)를 설치합니다.
-          수백 MB를 내려받기 때문에 몇 분 걸릴 수 있습니다.
+          필요한 도구(Python 3.12, MediaPipe 등)를 <b>자동으로 내려받아</b> 앱 전용 폴더에 설치합니다.
+          Python을 따로 설치할 필요는 없어요. 처음 한 번, 수백 MB라 몇 분 걸릴 수 있습니다.
+          <span id="setup-python" hidden></span>
         </p>
         <div class="row"><button id="btn-setup" class="primary">설치 시작</button></div>
       </div>
@@ -44,15 +45,32 @@
       <section class="card">
         <h2><span class="step">1</span> 영상 고르기</h2>
         <label id="drop" class="drop" tabindex="0">
-          <input id="file" type="file" accept="video/*" hidden />
+          <input id="file" type="file" accept="video/*,.bvh" hidden />
           <span class="drop-big">영상을 여기로 끌어 놓거나 클릭해서 선택</span>
-          <span class="drop-small">mp4, mov, webm 등 · 전신이 보이고 카메라가 고정된 영상이 잘 됩니다</span>
+          <span class="drop-small">mp4, mov, webm 등 · 전신이 보이고 카메라가 고정된 영상이 잘 됩니다 · 다른 모캡 앱의 <b>.bvh</b> 파일도 됩니다</span>
         </label>
         <div class="row url-row">
           <input id="url" type="url" placeholder="또는 영상 주소(URL) 붙여넣기" />
           <button id="btn-url">불러오기</button>
         </div>
         <p class="hint">URL은 본인에게 권리가 있는 영상에만 사용하세요 (유튜브 약관 주의).</p>
+        <div id="bvh-box" class="result" hidden>
+          <p id="bvh-text">BVH 모션 파일</p>
+          <span class="muted">다른 모션캡처 도구에서 만든 동작입니다. 영상 인식 없이 그대로 캐릭터용으로 변환합니다.</span>
+        </div>
+        <details class="adv">
+          <summary>인식 결과가 마음에 안 들면: 더 정확한 무료 모캡 서비스</summary>
+          <p class="hint">
+            아래 서비스에서 같은 영상을 올려 <b>BVH</b>로 내려받은 뒤, 그 파일을 위 칸에 넣으면 됩니다. 그래픽카드와 상관없이
+            웹에서 처리되고, 결과가 이 앱의 인식보다 정확한 경우가 많습니다. 무료 범위와 결과물 이용 조건은 각 서비스에서 확인하세요.
+          </p>
+          <div class="row">
+            <button data-link="https://www.rokoko.com/products/vision">Rokoko Vision (카메라 1대 무료)</button>
+            <button data-link="https://plask.ai">Plask (하루 무료 분량)</button>
+            <button data-link="https://www.deepmotion.com/animate-3d">DeepMotion (무료 등급)</button>
+            <button data-link="https://www.quickmagic.ai">QuickMagic (무료 등급)</button>
+          </div>
+        </details>
 
         <div id="video-box" hidden>
           <video id="video" controls preload="metadata"></video>
@@ -98,11 +116,14 @@
             <span id="smooth-label">보통</span>
           </div>
 
-          <span>정확도</span>
-          <div class="seg" id="model">
-            <button data-v="lite">빠르게</button>
-            <button data-v="full">보통</button>
-            <button data-v="heavy" class="on">정확하게</button>
+          <span>인식 방식</span>
+          <div>
+            <div class="seg" id="model">
+              <button data-v="rtm" class="on">정확하게</button>
+              <button data-v="heavy">보통</button>
+              <button data-v="lite">빠르게</button>
+            </div>
+            <p class="hint">정확하게 = RTMW3D (그래픽카드 사용, AMD 가능 · 처음 한 번 모델 약 300MB). 안 되면 자동으로 ‘보통’으로 바꿔 진행합니다.</p>
           </div>
 
           <span>거울 영상</span>
