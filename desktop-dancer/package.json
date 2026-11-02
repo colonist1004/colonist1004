@@ -38,12 +38,15 @@
       "target": [
         "portable",
         "nsis"
-      ],
-      "artifactName": "DesktopDancer-${version}-${arch}-${target}.${ext}"
+      ]
     },
     "nsis": {
       "oneClick": true,
-      "perMachine": false
+      "perMachine": false,
+      "artifactName": "DesktopDancer-${version}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "DesktopDancer-${version}-portable.${ext}"
     }
   }
 }
