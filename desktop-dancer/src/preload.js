@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('dancer', {
   setHover: (hovering) => ipcRenderer.send('set-hover', hovering),
   drag: (phase, screenX) => ipcRenderer.send('drag', phase, screenX),
   reportError: (msg) => ipcRenderer.send('renderer-error', String(msg)),
+  devFrame: (i, dataUrl) => ipcRenderer.send('dev-frame', i, dataUrl),
+  devRecordDone: () => ipcRenderer.send('dev-record-done'),
   onLoad: (cb) => ipcRenderer.on('load', (_e, v) => cb(v)),
   onSettings: (cb) => ipcRenderer.on('settings', (_e, v) => cb(v)),
 });

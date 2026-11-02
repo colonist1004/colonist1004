@@ -1,0 +1,194 @@
+{
+ "_comment": "VRM 1.0 humanoid reference skeleton, T-pose, meters, facing +Z, character left = +X. Shared by the JS sample generator and the Python pipeline.",
+ "bones": [
+  {
+   "name": "hips",
+   "parent": null,
+   "pos": [
+    0,
+    0.95,
+    0
+   ]
+  },
+  {
+   "name": "spine",
+   "parent": "hips",
+   "pos": [
+    0,
+    1.05,
+    0
+   ]
+  },
+  {
+   "name": "chest",
+   "parent": "spine",
+   "pos": [
+    0,
+    1.2,
+    0
+   ]
+  },
+  {
+   "name": "neck",
+   "parent": "chest",
+   "pos": [
+    0,
+    1.42,
+    0
+   ]
+  },
+  {
+   "name": "head",
+   "parent": "neck",
+   "pos": [
+    0,
+    1.5,
+    0
+   ]
+  },
+  {
+   "name": "leftShoulder",
+   "parent": "chest",
+   "pos": [
+    0.04,
+    1.38,
+    0
+   ]
+  },
+  {
+   "name": "leftUpperArm",
+   "parent": "leftShoulder",
+   "pos": [
+    0.17,
+    1.38,
+    0
+   ]
+  },
+  {
+   "name": "leftLowerArm",
+   "parent": "leftUpperArm",
+   "pos": [
+    0.43,
+    1.38,
+    0
+   ]
+  },
+  {
+   "name": "leftHand",
+   "parent": "leftLowerArm",
+   "pos": [
+    0.67,
+    1.38,
+    0
+   ]
+  },
+  {
+   "name": "rightShoulder",
+   "parent": "chest",
+   "pos": [
+    -0.04,
+    1.38,
+    0
+   ]
+  },
+  {
+   "name": "rightUpperArm",
+   "parent": "rightShoulder",
+   "pos": [
+    -0.17,
+    1.38,
+    0
+   ]
+  },
+  {
+   "name": "rightLowerArm",
+   "parent": "rightUpperArm",
+   "pos": [
+    -0.43,
+    1.38,
+    0
+   ]
+  },
+  {
+   "name": "rightHand",
+   "parent": "rightLowerArm",
+   "pos": [
+    -0.67,
+    1.38,
+    0
+   ]
+  },
+  {
+   "name": "leftUpperLeg",
+   "parent": "hips",
+   "pos": [
+    0.09,
+    0.91,
+    0
+   ]
+  },
+  {
+   "name": "leftLowerLeg",
+   "parent": "leftUpperLeg",
+   "pos": [
+    0.09,
+    0.5,
+    0
+   ]
+  },
+  {
+   "name": "leftFoot",
+   "parent": "leftLowerLeg",
+   "pos": [
+    0.09,
+    0.09,
+    0
+   ]
+  },
+  {
+   "name": "leftToes",
+   "parent": "leftFoot",
+   "pos": [
+    0.09,
+    0.02,
+    0.12
+   ]
+  },
+  {
+   "name": "rightUpperLeg",
+   "parent": "hips",
+   "pos": [
+    -0.09,
+    0.91,
+    0
+   ]
+  },
+  {
+   "name": "rightLowerLeg",
+   "parent": "rightUpperLeg",
+   "pos": [
+    -0.09,
+    0.5,
+    0
+   ]
+  },
+  {
+   "name": "rightFoot",
+   "parent": "rightLowerLeg",
+   "pos": [
+    -0.09,
+    0.09,
+    0
+   ]
+  },
+  {
+   "name": "rightToes",
+   "parent": "rightFoot",
+   "pos": [
+    -0.09,
+    0.02,
+    0.12
+   ]
+  }
+ ]
+}

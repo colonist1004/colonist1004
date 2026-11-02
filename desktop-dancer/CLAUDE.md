@@ -11,6 +11,11 @@ This folder is separate from the photo editor at the repo root and has its own `
 - Character format: VRM 1.0. Motion format: VRMA 1.0. Pipelines (Part A/B) must output these.
 - Pipelines (Part A/B, Python, likely run on a cloud NVIDIA GPU because the user has an AMD RX 9070 XT without CUDA) stay separate from the app. The app only consumes files from its library folders.
 
+## Pipeline (Part B)
+- `pipeline/extract_dance.py` runs the CLI. Math lives in `pipeline/dancer_pipeline/`: `retarget.py`, `lift.py`, `post.py`, `smpl.py`, `vrma.py`.
+- `shared/skeleton.json` is the single reference skeleton. It is used by the JS sample generator and the Python pipeline. VRMA rest rotations are identity.
+- Coordinates follow VRM 1.0: +Y up, the body faces +Z, character left = +X.
+
 ## Layout
 - `src/main.js`: window, tray, library, IPC. `src/placement.js`: pure placement math.
 - `src/renderer/`: rendering, hit-testing (pixel alpha → `setIgnoreMouseEvents`), FPS cap.
@@ -28,7 +33,9 @@ This folder is separate from the photo editor at the repo root and has its own `
 
 ## Milestones (spec F-1)
 1. ✅ C: sample VRM and sample motion play on the taskbar.
-2. B: one video → VRMA → plays in the app. Done when `scripts/check-assets.mjs` passes on the result.
+2. ✅ B: video → VRMA (`pipeline/`, Python CLI). MediaPipe runs locally. GVHMR runs on a cloud GPU via `pipeline/cloud/`.
+   Test with `python pipeline/tests/test_roundtrip.py`. For real-video accuracy, render a known motion with
+   `DANCER_RECORD=dir`, extract it, and compare with `pipeline/tools/compare_motion.py`.
 3. A: one image → rigged VRM (UniRig + humanoid bone mapping) → plays in the app.
 4. D: call the pipelines from the app and manage the library.
 5. Quality: post-processing, idle and interaction, music.

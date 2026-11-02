@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Dance video -> VRMA motion for Desktop Dancer.
+
+  python extract_dance.py dance.mp4 --start 12 --end 40 --name my-dance
+  python extract_dance.py "https://www.youtube.com/watch?v=..." --start 5 --end 25 --loop
+  python extract_dance.py dance.mp4 --engine gvhmr --gvhmr-result gvhmr_dance.npz
+
+The result goes into the app's motion library by default, so it shows up in the tray menu.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from dancer_pipeline import post  # noqa: E402
+from dancer_pipeline.library import motions_dir  # noqa: E402
+from dancer_pipeline.retarget import keypoints_to_rotations  # noqa: E402
+from dancer_pipeline.skeleton import BONES  # noqa: E402
+from dancer_pipeline.vrma import write_vrma  # noqa: E402
+
+MIRROR = np.diag([-1.0, 1.0, 1.0])
+
+
+def log(*a, **k):
+    print(*a, **k, flush=True)
+
+
+def swap_side(name: str) -> str:
+    for a, b in (("left", "right"), ("right", "left")):
+        if name.startswith(a):
+            return b + name[len(a):]
+    return name
+
+
+def mirror_keypoints(kp):
+    return {swap_side(k): v @ MIRROR for k, v in kp.items()}
+
+
+def mirror_rotations(local):
+    return {swap_side(b): MIRROR @ m @ MIRROR for b, m in local.items()}
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description="춤 영상 → VRMA 모션 (Desktop Dancer)")
+    p.add_argument("input", help="영상 파일 경로 또는 URL (URL은 yt-dlp로 내려받음)")
+    p.add_argument("--start", type=float, help="시작 시간(초)")
+    p.add_argument("--end", type=float, help="끝 시간(초)")
+    p.add_argument("--name", help="모션 이름 (파일 이름). 기본: 영상 파일 이름")
+    p.add_argument("--out", help="출력 .vrma 경로 또는 폴더. 기본: 앱 모션 라이브러리")
+    p.add_argument("--engine", choices=["mediapipe", "gvhmr"], default="mediapipe",
+                   help="mediapipe: 로컬 CPU (기본) / gvhmr: 클라우드 GPU에서 만든 결과(npz) 변환")
+    p.add_argument("--gvhmr-result", help="cloud/run_gvhmr.sh 가 만든 .npz (engine=gvhmr)")
+    p.add_argument("--model", choices=["lite", "full", "heavy"], default="heavy", help="MediaPipe 모델 크기")
+    p.add_argument("--person", type=int, help="여러 명일 때 대상 (첫 장면 기준 왼쪽부터 0,1,2…). 기본: 가장 큰 사람")
+    p.add_argument("--fps", type=float, default=30, help="처리/출력 프레임레이트 상한 (기본 30)")
+    p.add_argument("--smooth", type=float, default=1.0, help="떨림 제거 강도 (0=끔, 1=기본, 2=강하게)")
+    p.add_argument("--root", choices=["inplace", "planted", "original"], default="planted",
+                   help="inplace: 제자리 고정 / planted: 디딘 발 기준으로 조금씩 이동 (기본) / original: 원본 이동 (gvhmr)")
+    p.add_argument("--range", type=float, default=0.25, help="planted/original 이동 범위 제한(m, 기본 0.25)")
+    p.add_argument("--loop", action="store_true", help="끝과 시작이 이어지게 잘라서 반복 재생용으로 만듦")
+    p.add_argument("--mirror", action="store_true", help="좌우 반전 (거울 모드 안무 영상용)")
+    p.add_argument("--hands", type=float, default=0.7, help="손목 회전 반영 비율 (0~1, 기본 0.7)")
+    p.add_argument("--no-foot-lock", action="store_true", help="발 고정(IK) 끄기")
+    p.add_argument("--no-lift", action="store_true", help="2D+뼈 길이 보정 끄기 (MediaPipe 3D 좌표만 사용)")
+    p.add_argument("--save-keypoints", action="store_true", help="디버그용 키포인트 npz도 저장")
+    return p.parse_args(argv)
+
+
+def run_mediapipe(args, video):
+    from dancer_pipeline.lift import lift
+    from dancer_pipeline.pose_mediapipe import estimate
+    from dancer_pipeline.video import read_frames
+
+    frames = read_frames(video, args.start, args.end, args.fps)
+    _, fps = next(frames)
+    log(f"pose estimation (MediaPipe {args.model}, {fps:.1f} fps) ...")
+    kp, kp2d, valid = estimate(frames, fps, variant=args.model, person=args.person, log=log)
+    n = len(valid)
+    if n < 2:
+        raise SystemExit("처리할 프레임이 없습니다 (시간 범위를 확인하세요)")
+    ratio = valid.mean()
+    log(f"frames: {n}, person found in {ratio * 100:.0f}%")
+    if ratio < 0.5:
+        raise SystemExit("사람이 감지된 프레임이 50% 미만입니다. 전신이 보이는 구간을 지정하거나 --person 을 확인하세요.")
+    kp = {k: post.fill_gaps(v, valid) for k, v in kp.items()}
+    kp2d = {k: post.fill_gaps(v, valid) for k, v in kp2d.items()}
+    raw = {**{f"w_{k}": v for k, v in kp.items()}, **{f"i_{k}": v for k, v in kp2d.items()}, "fps": fps}
+    if not args.no_lift:
+        kp = lift(kp, kp2d, fps)
+    kp = post.align_gravity(kp)
+    if args.mirror:
+        kp = mirror_keypoints(kp)
+    sigma = 1.5 * args.smooth * fps / 30
+    kp = {k: post.gaussian_smooth(v, sigma) for k, v in kp.items()}
+    local = keypoints_to_rotations(kp, hand_weight=args.hands)
+    local = post.smooth_rotations(local, 0.75 * args.smooth * fps / 30)
+
+    if args.root == "original":
+        raise SystemExit("--root original 은 gvhmr 엔진에서만 됩니다 (MediaPipe는 전역 이동을 모름)")
+    hips_y = post.ground_per_frame(local, fps)
+    if args.root == "planted":
+        xz = post.planted_root_xz(local, hips_y, fps, args.range)
+    else:
+        xz = np.zeros((n, 2))
+    root = post.compose_root(xz, hips_y)
+    if not args.no_foot_lock:
+        local = post.foot_lock(local, root, fps)
+    extra = {"detected_ratio": round(float(ratio), 3)}
+    if args.save_keypoints:
+        extra["keypoints"] = raw
+    return fps, local, root, extra
+
+
+def run_gvhmr(args):
+    from dancer_pipeline.smpl import load_smpl_npz, smpl_to_rotations
+
+    if not args.gvhmr_result:
+        raise SystemExit(
+            "GVHMR은 NVIDIA GPU가 필요해서 클라우드에서 실행합니다.\n"
+            "  1) pipeline/cloud/README.md 대로 RunPod/Colab에서 run_gvhmr.sh 실행 → <이름>.npz\n"
+            "  2) python extract_dance.py <영상> --engine gvhmr --gvhmr-result <이름>.npz"
+        )
+    go, bp, transl, fps = load_smpl_npz(args.gvhmr_result)
+    local, root = smpl_to_rotations(go, bp, transl)
+    # Optional time range on the result (seconds of the processed video)
+    a = int(round((args.start or 0) * fps))
+    b = int(round(args.end * fps)) + 1 if args.end is not None else len(root)
+    local = {k: v[a:b] for k, v in local.items()}
+    root = root[a:b]
+    if args.mirror:
+        local = mirror_rotations(local)
+        root = root @ MIRROR
+    local = post.smooth_rotations(local, 0.5 * args.smooth * fps / 30)
+    n = len(root)
+    hips_y = post.gaussian_smooth(post.ground_trajectory(local, root[:, 1]), 0.5 * args.smooth * fps / 30)
+    if args.root == "original":
+        xz = root[:, [0, 2]] - root[:, [0, 2]].mean(axis=0)
+        xz = args.range * np.tanh(xz / max(args.range, 1e-6)) if args.range > 0 else xz
+    elif args.root == "planted":
+        xz = post.planted_root_xz(local, hips_y, fps, args.range)
+    else:
+        xz = np.zeros((n, 2))
+    root = post.compose_root(xz, hips_y)
+    if not args.no_foot_lock:
+        local = post.foot_lock(local, root, fps)
+    return fps, local, root, {}
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    from dancer_pipeline.video import download, is_url
+
+    source = args.input
+    video = download(source, log=log) if is_url(source) else Path(source)
+    if args.engine == "mediapipe" and not video.exists():
+        raise SystemExit(f"파일이 없습니다: {video}")
+
+    if args.engine == "gvhmr":
+        fps, local, root, extra = run_gvhmr(args)
+    else:
+        fps, local, root, extra = run_mediapipe(args, video)
+
+    if args.loop:
+        local, root, n = post.make_loop(local, root, fps)
+        log(f"loop: cut at {n / fps:.2f}s")
+
+    name = args.name or (Path(video).stem if not is_url(source) else "dance")
+    out = Path(args.out) if args.out else motions_dir()
+    if out.suffix.lower() != ".vrma":
+        out.mkdir(parents=True, exist_ok=True)
+        out = out / f"{name}.vrma"
+    else:
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+    local = {b: m for b, m in local.items() if b in BONES}
+    write_vrma(out, fps, local, root, name=name)
+    n = len(root)
+    meta = {
+        "name": name,
+        "source": source,
+        "start": args.start,
+        "end": args.end,
+        "engine": args.engine,
+        "created": dt.datetime.now().isoformat(timespec="seconds"),
+        "fps": round(fps, 3),
+        "frames": n,
+        "duration": round((n - 1) / fps, 3),
+        "options": {k: getattr(args, k) for k in ("model", "person", "smooth", "root", "range", "loop", "mirror", "hands")},
+    }
+    meta.update({k: v for k, v in extra.items() if k != "keypoints"})
+    out.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    if "keypoints" in extra:
+        np.savez_compressed(out.with_suffix(".keypoints.npz"), **extra["keypoints"])
+    log(f"saved {out}  ({meta['duration']:.1f}s, {n} frames)")
+    return out
+
+
+if __name__ == "__main__":
+    main()

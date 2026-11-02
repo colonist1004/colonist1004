@@ -2,7 +2,7 @@
 
 Windows 작업표시줄 위에서 3D 캐릭터(VRM)가 춤(VRMA)을 추는 데스크탑 앱입니다.
 현재 단계는 **Part C MVP**입니다. 샘플 캐릭터와 샘플 춤이 작업표시줄 위에서 반복 재생됩니다.
-이미지로 캐릭터를 만드는 Part A와 영상에서 춤을 추출하는 Part B는 다음 마일스톤입니다. 자세한 내용은 [docs/spec.md](docs/spec.md)를 참고하세요.
+영상에서 춤을 추출하는 Part B(`pipeline/`)도 들어 있습니다. 이미지로 캐릭터를 만드는 Part A는 다음 마일스톤입니다. 자세한 내용은 [docs/spec.md](docs/spec.md)를 참고하세요.
 
 ## 받기 (Windows)
 
@@ -24,6 +24,24 @@ GitHub 저장소 **Actions → Build Desktop Dancer (Windows)** 에서 최근 �
   - 우클릭 메뉴: 캐릭터·춤 변경, VRM/VRMA 파일 추가, 크기, 모니터, 속도, FPS 제한, 자동 실행, 위치 초기화, 라이브러리 폴더 열기, 종료
 - **캐릭터 → 샘플 캐릭터 내려받기 (Seed-san)** 를 누르면 VRM 컨소시엄의 샘플 캐릭터를 받습니다. 라이선스는 VRM Public License 1.0입니다.
 - 내가 가진 `.vrm` / `.vrma` 파일은 **파일 추가…** 로 넣을 수 있습니다. **라이브러리 폴더 열기** 로 연 폴더에 직접 복사해도 됩니다. 폴더 위치는 `%APPDATA%\desktop-dancer\library` 입니다.
+
+## 내 춤 영상으로 모션 만들기
+
+[`pipeline/README.md`](pipeline/README.md) 를 참고하세요. 간단히 정리하면 아래와 같습니다.
+
+```bash
+cd pipeline
+```
+
+```bash
+pip install -r requirements.txt
+```
+
+```bash
+python extract_dance.py 춤영상.mp4 --start 10 --end 30 --loop
+```
+
+만든 모션은 앱의 트레이 메뉴 **춤**에 자동으로 나타납니다.
 
 ## 기본 포함 에셋
 
@@ -56,6 +74,7 @@ node scripts/check-assets.mjs path/to/character.vrm path/to/motion.vrma
 - `DANCER_SELFTEST=out.png`: 몇 초 뒤 창을 캡처해 저장하고 앱을 종료합니다. 대기 시간은 `DANCER_SELFTEST_DELAY` 로 바꿉니다(ms).
 - `DANCER_FREEZE_T=1.5`: 춤을 해당 시각에 멈춥니다.
 - `DANCER_USER_DATA=dir`: 설정과 라이브러리 폴더 위치를 바꿉니다.
+- `DANCER_RECORD=dir`: 모션을 30fps PNG 프레임으로 렌더링한 뒤 종료합니다. 프레임 수는 `DANCER_RECORD_FRAMES` 로 정합니다. 추출 정확도 테스트용 영상을 만들 때 씁니다.
 
 ## 구조
 

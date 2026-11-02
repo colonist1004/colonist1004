@@ -1,32 +1,13 @@
 // VRM 1.0 humanoid reference skeleton in T-pose (meters, facing +Z, character's left = +X).
 // Shared by the sample character and the sample dance so both use the same rest pose.
 
+import { readFileSync } from 'node:fs';
+
+// Single source of truth: shared/skeleton.json (also read by the Python pipeline).
+const json = JSON.parse(readFileSync(new URL('../shared/skeleton.json', import.meta.url), 'utf8'));
+
 /** [boneName, parentName, worldPosition] */
-export const BONES = [
-  ['hips', null, [0, 0.95, 0]],
-  ['spine', 'hips', [0, 1.05, 0]],
-  ['chest', 'spine', [0, 1.2, 0]],
-  ['neck', 'chest', [0, 1.42, 0]],
-  ['head', 'neck', [0, 1.5, 0]],
-
-  ['leftShoulder', 'chest', [0.04, 1.38, 0]],
-  ['leftUpperArm', 'leftShoulder', [0.17, 1.38, 0]],
-  ['leftLowerArm', 'leftUpperArm', [0.43, 1.38, 0]],
-  ['leftHand', 'leftLowerArm', [0.67, 1.38, 0]],
-  ['rightShoulder', 'chest', [-0.04, 1.38, 0]],
-  ['rightUpperArm', 'rightShoulder', [-0.17, 1.38, 0]],
-  ['rightLowerArm', 'rightUpperArm', [-0.43, 1.38, 0]],
-  ['rightHand', 'rightLowerArm', [-0.67, 1.38, 0]],
-
-  ['leftUpperLeg', 'hips', [0.09, 0.91, 0]],
-  ['leftLowerLeg', 'leftUpperLeg', [0.09, 0.5, 0]],
-  ['leftFoot', 'leftLowerLeg', [0.09, 0.09, 0]],
-  ['leftToes', 'leftFoot', [0.09, 0.02, 0.12]],
-  ['rightUpperLeg', 'hips', [-0.09, 0.91, 0]],
-  ['rightLowerLeg', 'rightUpperLeg', [-0.09, 0.5, 0]],
-  ['rightFoot', 'rightLowerLeg', [-0.09, 0.09, 0]],
-  ['rightToes', 'rightFoot', [-0.09, 0.02, 0.12]],
-];
+export const BONES = json.bones.map((b) => [b.name, b.parent, b.pos]);
 
 export const BONE_MAP = Object.fromEntries(BONES.map(([n, p, pos]) => [n, { parent: p, pos }]));
 

@@ -1,3 +1,6 @@
 node_modules/
 dist/
 src/renderer/vendor/
+__pycache__/
+*.pyc
+.venv/

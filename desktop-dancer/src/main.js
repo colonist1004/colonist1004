@@ -38,6 +38,21 @@ function ensureUserLibrary() {
   for (const kind of ['characters', 'motions']) fs.mkdirSync(path.join(userLibrary(), kind), { recursive: true });
 }
 
+// New files from the pipeline (or copied by hand) appear in the tray menu without a restart.
+function watchLibrary() {
+  let timer = null;
+  for (const kind of ['characters', 'motions']) {
+    try {
+      fs.watch(path.join(userLibrary(), kind), () => {
+        clearTimeout(timer);
+        timer = setTimeout(rebuildTrayMenu, 500);
+      });
+    } catch (e) {
+      console.error('library watch failed', e);
+    }
+  }
+}
+
 function resolveAsset(kind, ext, wanted) {
   const all = listLibrary(kind, ext);
   if (wanted && all.includes(wanted)) return wanted; // only files still in the library
@@ -92,8 +107,11 @@ function createWindow() {
     win.webContents.on('console-message', (_e, level, message) => console.log(`[renderer:${level}] ${message}`));
   }
   // DANCER_FREEZE_T=1.5 freezes the motion at that time (dev: inspect poses).
-  const query = process.env.DANCER_FREEZE_T ? { t: process.env.DANCER_FREEZE_T } : undefined;
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query });
+  // DANCER_RECORD=dir DANCER_RECORD_FRAMES=240 renders frames at 30 fps into dir, then quits (dev: test videos).
+  const query = {};
+  if (process.env.DANCER_FREEZE_T) query.t = process.env.DANCER_FREEZE_T;
+  if (process.env.DANCER_RECORD) query.record = process.env.DANCER_RECORD_FRAMES || '240';
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: Object.keys(query).length ? query : undefined });
   win.once('ready-to-show', () => {
     if (settings.get().visible) win.showInactive();
   });
@@ -368,6 +386,15 @@ ipcMain.on('drag', (_e, phase, screenX) => {
   }
 });
 
+if (process.env.DANCER_RECORD) {
+  ipcMain.on('dev-frame', (_e, i, dataUrl) => {
+    const dir = process.env.DANCER_RECORD;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `frame_${String(i).padStart(5, '0')}.png`), Buffer.from(dataUrl.split(',')[1], 'base64'));
+  });
+  ipcMain.on('dev-record-done', () => app.quit());
+}
+
 ipcMain.on('renderer-error', (_e, msg) => {
   console.error('[renderer]', msg);
 });
@@ -396,6 +423,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     settings.load(app.getPath('userData'));
     ensureUserLibrary();
+    watchLibrary();
     createWindow();
     tray = new Tray(trayIcon());
     tray.setToolTip('Desktop Dancer');

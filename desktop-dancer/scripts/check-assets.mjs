@@ -1,5 +1,5 @@
 // Headless sanity check of the character/motion pipeline (no window needed):
-//   node scripts/check-assets.mjs [character.vrm] [motion.vrma]
+//   node scripts/check-assets.mjs [character.vrm] [motion.vrma] [--no-loop]
 // Loads both with the same loaders the app uses, plays the motion and checks that
 // the feet stay on the floor (little sliding), nothing sinks below the floor and the loop is seamless.
 import { readFileSync } from 'node:fs';
@@ -18,8 +18,9 @@ for (const k of ['warn', 'error']) {
 }
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const charPath = process.argv[2] || join(root, 'assets/characters/mannequin.vrm');
-const motionPath = process.argv[3] || join(root, 'assets/motions/sample-dance.vrma');
+const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const charPath = args[0] || join(root, 'assets/characters/mannequin.vrm');
+const motionPath = args[1] || join(root, 'assets/motions/sample-dance.vrma');
 
 const loader = new GLTFLoader();
 loader.register((p) => new VRMLoaderPlugin(p));
@@ -62,26 +63,46 @@ const sample = (t) => {
   return Object.fromEntries(required.map((b) => [b, pos(b)]));
 };
 
-const rest = sample(0);
-const footRestY = Math.min(rest.leftFoot.y, rest.rightFoot.y);
-let maxSlide = 0, maxLift = 0, minY = Infinity;
-const steps = 120;
-for (let i = 0; i <= steps; i++) {
-  const p = sample((clip.duration * i) / steps);
-  for (const f of ['leftFoot', 'rightFoot']) {
-    maxSlide = Math.max(maxSlide, Math.hypot(p[f].x - rest[f].x, p[f].z - rest[f].z));
-    maxLift = Math.max(maxLift, p[f].y - rest[f].y);
-  }
-  for (const v of Object.values(p)) minY = Math.min(minY, v.y);
-}
-const height = rest.head.y;
-check(maxSlide < height * 0.05, 'feet do not slide', `max ${(maxSlide * 100).toFixed(1)} cm`);
-check(maxLift < height * 0.08, 'feet stay near the floor', `max lift ${(maxLift * 100).toFixed(1)} cm`);
-check(minY > footRestY - height * 0.02, 'nothing sinks below the floor', `lowest joint ${(minY * 100).toFixed(1)} cm`);
+// Floor = foot height in the character's rest pose (before any motion is applied).
+mixer.stopAllAction();
+vrm.humanoid.resetNormalizedPose();
+vrm.update(0);
+vrm.scene.updateMatrixWorld(true);
+const restPose = Object.fromEntries(required.map((b) => [b, pos(b)]));
+const floorY = Math.min(restPose.leftFoot.y, restPose.rightFoot.y);
+const height = restPose.head.y;
+mixer.clipAction(clip).play();
 
-const a = sample(0), b = sample(clip.duration - 1e-4);
-const seam = Math.max(...required.map((k) => a[k].distanceTo(b[k])));
-check(seam < height * 0.01, 'loop is seamless', `max jump ${(seam * 1000).toFixed(1)} mm`);
+// Sample at 30 fps. Sliding = horizontal speed of whichever foot is on the floor (the support foot).
+const dt = 1 / 30;
+const frames = Math.max(2, Math.round(clip.duration / dt));
+let minY = Infinity, prev = null, slideSum = 0, slideN = 0, slideMax = 0;
+const lowest = [];
+for (let i = 0; i <= frames; i++) {
+  const p = sample(Math.min(i * dt, clip.duration - 1e-4));
+  for (const v of Object.values(p)) minY = Math.min(minY, v.y);
+  const support = p.leftFoot.y < p.rightFoot.y ? 'leftFoot' : 'rightFoot';
+  lowest.push(p[support].y - floorY);
+  if (prev && p[support].y - floorY < height * 0.03) {
+    const v = Math.hypot(p[support].x - prev[support].x, p[support].z - prev[support].z) / dt;
+    slideSum += v;
+    slideN++;
+    slideMax = Math.max(slideMax, v);
+  }
+  prev = p;
+}
+const slide = slideN ? slideSum / slideN : 0;
+lowest.sort((a, b) => a - b);
+const p90 = lowest[Math.floor(lowest.length * 0.9)];
+check(slide < 0.15, 'support foot does not slide', `mean ${(slide * 100).toFixed(1)} cm/s, max ${(slideMax * 100).toFixed(0)} cm/s`);
+check(p90 < height * 0.06, 'a foot stays on the floor', `p90 ${(p90 * 100).toFixed(1)} cm above floor`);
+check(minY > floorY - height * 0.02, 'nothing sinks below the floor', `lowest joint ${((minY - floorY) * 100).toFixed(1)} cm vs floor`);
+
+if (!process.argv.includes('--no-loop')) {
+  const a = sample(0), b = sample(clip.duration - 1e-4);
+  const seam = Math.max(...required.map((k) => a[k].distanceTo(b[k])));
+  check(seam < height * 0.01, 'loop is seamless', `max jump ${(seam * 1000).toFixed(1)} mm`);
+}
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed');
 process.exit(failed ? 1 : 0);

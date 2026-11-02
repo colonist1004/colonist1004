@@ -195,6 +195,18 @@ let acc = 0;
 let frameNo = 0;
 const freezeParam = new URLSearchParams(location.search).get('t');
 const freezeT = freezeParam == null ? null : Number(freezeParam);
+const recordFrames = Number(new URLSearchParams(location.search).get('record') || 0);
+let recordIndex = -1; // starts once the character and motion are loaded
+
+function recordStep() {
+  // Dev: deterministic 30 fps frames of the motion, written to disk by main.
+  if (recordIndex >= recordFrames) return api.devRecordDone();
+  mixer.setTime(recordIndex / 30);
+  vrm.update(1 / 30);
+  renderer.render(scene, camera);
+  api.devFrame(recordIndex, canvas.toDataURL('image/png'));
+  recordIndex++;
+}
 
 function idlePose(t) {
   // Gentle breathing when no motion is loaded.
@@ -212,6 +224,10 @@ function idlePose(t) {
 
 function tick() {
   requestAnimationFrame(tick);
+  if (recordFrames && mixer) {
+    if (recordIndex < 0) recordIndex = 0;
+    return recordStep();
+  }
   acc += clock.getDelta();
   const step = 1 / settings.fps;
   if (acc < step) return;
