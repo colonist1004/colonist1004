@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'sha256-gFJstyDShrJmVSS8KOJbPBMXM1LG3/gCXWJM40prxaQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' data: blob:"
+    />
+    <title>Desktop Dancer</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      body.hover canvas {
+        cursor: grab;
+      }
+      body.dragging canvas {
+        cursor: grabbing;
+      }
+      #msg {
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        font: 12px/1.4 'Segoe UI', 'Malgun Gothic', sans-serif;
+        color: #fff;
+        background: rgba(0, 0, 0, 0.65);
+        border-radius: 6px;
+        padding: 6px 8px;
+        display: none;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three.module.js",
+          "three/addons/": "./vendor/jsm/",
+          "@pixiv/three-vrm": "./vendor/three-vrm.module.js",
+          "@pixiv/three-vrm-animation": "./vendor/three-vrm-animation.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="msg"></div>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

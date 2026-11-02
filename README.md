@@ -1,5 +1,7 @@
 # 사진 편집기 (Android APK)
 
+> 이 저장소에는 별도 프로젝트 [`desktop-dancer/`](desktop-dancer/README.md)도 있습니다. 작업표시줄 위에서 VRM 캐릭터가 춤추는 Windows 앱입니다.
+
 라이트룸 스타일의 사진 편집기를 [Capacitor](https://capacitorjs.com)로 감싼 안드로이드 앱입니다.
 모든 처리는 기기 안에서만 이루어지며 사진이 외부로 전송되지 않습니다.
 

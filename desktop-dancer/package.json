@@ -1,0 +1,49 @@
+{
+  "name": "desktop-dancer",
+  "version": "0.1.0",
+  "description": "작업표시줄 위에서 VRM 캐릭터가 춤추는 데스크탑 앱",
+  "main": "src/main.js",
+  "scripts": {
+    "prestart": "node scripts/vendor.mjs",
+    "start": "electron .",
+    "gen:samples": "node scripts/make-samples.mjs",
+    "predist": "node scripts/vendor.mjs",
+    "dist": "electron-builder --win portable nsis --publish never",
+    "test": "node scripts/test-placement.mjs && node scripts/check-assets.mjs"
+  },
+  "author": "desktop-dancer",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@pixiv/three-vrm": "^3.5.5",
+    "@pixiv/three-vrm-animation": "^3.5.5",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "three": "^0.170.0"
+  },
+  "private": true,
+  "build": {
+    "appId": "com.desktopdancer.app",
+    "productName": "Desktop Dancer",
+    "files": [
+      "src/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "artifactName": "DesktopDancer-${version}-${arch}-${target}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  }
+}
