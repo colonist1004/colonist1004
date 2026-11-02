@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>사진 편집기</title>
+<style>
+:root{--bg:#f4f4f2;--panel:#fff;--text:#1c1c1c;--mute:#777;--line:#ddd;--acc:#2f6fed;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161616;--panel:#222;--text:#eee;--mute:#999;--line:#383838;--acc:#5b92ff}}
+:root[data-theme="dark"]{--bg:#161616;--panel:#222;--text:#eee;--mute:#999;--line:#383838;--acc:#5b92ff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif}
+.app{display:flex;gap:12px;padding:12px;min-height:100vh}
+.stage{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.view{flex:1;min-height:320px;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+canvas{max-width:100%;max-height:78vh;display:block}
+.empty{color:var(--mute);text-align:center;padding:24px;line-height:1.6}
+.bar{display:flex;gap:8px;flex-wrap:wrap}
+button,label.btn{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;user-select:none;-webkit-user-select:none}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+button:disabled{opacity:.5}
+.side{width:300px;max-width:100%;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;overflow-y:auto;max-height:calc(100vh - 24px)}
+h3{margin:14px 0 6px;font-size:12px;letter-spacing:.04em;color:var(--mute);text-transform:uppercase}
+h3:first-child{margin-top:0}
+.row{display:grid;grid-template-columns:70px 1fr 38px;align-items:center;gap:6px;margin:5px 0;font-size:13px}
+.row input{width:100%;accent-color:var(--acc)}
+.row output{text-align:right;color:var(--mute);font-variant-numeric:tabular-nums}
+.note{font-size:12px;color:var(--mute);line-height:1.5;margin:6px 0}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#000c;color:#fff;padding:10px 16px;border-radius:20px;font-size:14px;pointer-events:none;opacity:0;transition:opacity .2s}
+.toast.on{opacity:1}
+@media(max-width:760px){.app{flex-direction:column}.side{width:100%;max-height:none}canvas{max-height:55vh}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <div class="view" id="view">
+      <div class="empty" id="empty">사진을 불러오세요<br>(사진은 기기 안에서만 처리되고 외부로 전송되지 않습니다)</div>
+      <canvas id="cv" hidden></canvas>
+    </div>
+    <div class="bar">
+      <label class="btn">사진 열기<input id="file" type="file" accept="image/*" hidden></label>
+      <button id="cmp">누르는 동안 원본 보기</button>
+      <button id="mask">피부 영역 보기</button>
+      <button id="reset">초기화</button>
+      <button class="pri" id="save">JPEG 저장</button>
+    </div>
+  </div>
+  <div class="side" id="side"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const NATIVE=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+// 휴대폰 WebView 메모리 한계 때문에 앱에서는 저장 해상도를 긴 변 기준으로 제한
+const SAVE_MAX=NATIVE?4096:Infinity;
+
+const GROUPS=[
+ ['기본',[['exposure','노출',-2,2,0,.01],['contrast','대비',-100,100,0,1],['highlights','하이라이트',-100,100,0,1],['shadows','섀도우',-100,100,0,1]]],
+ ['색상',[['temp','색온도',-100,100,0,1],['tint','틴트',-100,100,0,1],['vibrance','활기',-100,100,0,1],['sat','채도',-100,100,0,1]]],
+ ['인물 보정',[['smooth','피부 스무딩',0,100,0,1],['bright','피부 밝기',-50,50,0,1]]]
+];
+const P={};const side=document.getElementById('side');
+GROUPS.forEach(([name,items])=>{
+  side.insertAdjacentHTML('beforeend',`<h3>${name}</h3>`);
+  items.forEach(([k,l,mn,mx,d,st])=>{
+    P[k]=d;
+    const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<span>${l}</span><input type="range" min="${mn}" max="${mx}" step="${st}" value="${d}" data-k="${k}"><output>${d}</output>`;
+    side.appendChild(r);
+  });
+});
+side.insertAdjacentHTML('beforeend','<p class="note">피부 영역은 색상 기반으로 검출합니다. 얼굴 인식 모델(MediaPipe)을 붙이면 정확도가 크게 올라갑니다.</p>');
+const DEF={...P};
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
+let orig=null,fullImg=null,pre=null,showOrig=false,showMask=false,raf=0;
+
+function toast(msg,ms=2200){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('on'),ms)}
+
+side.addEventListener('input',e=>{
+  const k=e.target.dataset.k;if(!k)return;
+  P[k]=parseFloat(e.target.value);e.target.nextElementSibling.textContent=e.target.value;sched();
+});
+function sched(){if(!raf)raf=requestAnimationFrame(()=>{raf=0;render()})}
+
+document.getElementById('file').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const img=new Image();img.onload=()=>{fullImg=img;load(img)};
+  img.onerror=()=>toast('이 사진 형식은 열 수 없습니다');
+  if(img.src&&img.src.startsWith('blob:'))URL.revokeObjectURL(img.src);
+  img.src=URL.createObjectURL(f);
+  e.target.value='';
+};
+function load(img){
+  const s=Math.min(1,1400/Math.max(img.naturalWidth,img.naturalHeight));
+  cv.width=Math.round(img.naturalWidth*s);cv.height=Math.round(img.naturalHeight*s);
+  ctx.drawImage(img,0,0,cv.width,cv.height);
+  orig=ctx.getImageData(0,0,cv.width,cv.height);
+  pre=prep(orig);
+  document.getElementById('empty').hidden=true;cv.hidden=false;render();
+}
+
+// 피부 마스크(YCbCr 기반, 0~255) + 블러 이미지
+function skinMask(d,w,h){
+  const m=new Uint8ClampedArray(w*h);
+  for(let i=0,p=0;i<m.length;i++,p+=4){
+    const r=d[p],g=d[p+1],b=d[p+2];
+    const cb=128-0.168736*r-0.331264*g+0.5*b, cr=128+0.5*r-0.418688*g-0.081312*b;
+    const y=0.299*r+0.587*g+0.114*b;
+    const a=Math.max(0,1-Math.max(Math.max(77-cb,cb-127),Math.max(135-cr,cr-173),0)/10);
+    m[i]=(y>40&&y<245)?a*255:0;
+  }
+  return blurGray(m,w,h,Math.max(2,Math.round(Math.max(w,h)/300)));
+}
+function boxPass(src,dst,w,h,r,ch,horiz){
+  const n=horiz?w:h,lines=horiz?h:w,step=horiz?ch:w*ch,ls=horiz?w*ch:ch;
+  for(let c=0;c<ch;c++)for(let l=0;l<lines;l++){
+    const base=l*ls+c;let sum=0;
+    for(let i=-r;i<=r;i++)sum+=src[base+Math.min(n-1,Math.max(0,i))*step];
+    for(let i=0;i<n;i++){
+      dst[base+i*step]=sum/(2*r+1);
+      sum+=src[base+Math.min(n-1,i+r+1)*step]-src[base+Math.max(0,i-r)*step];
+    }
+  }
+}
+function blurGray(a,w,h,r){const t=new Float32Array(a.length),o=new Uint8ClampedArray(a.length);boxPass(a,t,w,h,r,1,true);boxPass(t,o,w,h,r,1,false);return o}
+function blurRGBA(d,w,h,r){
+  const t=new Float32Array(d.length),o=new Float32Array(d.length);
+  boxPass(d,t,w,h,r,4,true);boxPass(t,o,w,h,r,4,false);return o;
+}
+function prep(img){
+  const {data,width:w,height:h}=img;
+  const r=Math.max(2,Math.round(Math.max(w,h)/180));
+  return {mask:skinMask(data,w,h),blur:blurRGBA(data,w,h,r)};
+}
+
+function process(src,pp,out){
+  const d=src.data,o=out.data,N=d.length;
+  const ex=Math.pow(2,P.exposure),ct=1+P.contrast/100,hi=P.highlights/100,sh=P.shadows/100;
+  const tp=P.temp/100,tn=P.tint/100,sat=1+P.sat/100,vib=P.vibrance/100,sm=P.smooth/100,sb=P.bright/100;
+  for(let p=0,i=0;p<N;p+=4,i++){
+    let r=d[p]/255,g=d[p+1]/255,b=d[p+2]/255;
+    const mk=pp.mask[i]/255;
+    if(showMask){o[p]=o[p+1]=o[p+2]=mk*255;o[p+3]=255;continue}
+    if(sm>0&&mk>0){ // 엣지 보존 스무딩: 차이가 큰 부분(눈,입,윤곽)은 덜 흐리게
+      const br=pp.blur[p]/255,bg=pp.blur[p+1]/255,bb=pp.blur[p+2]/255;
+      const diff=Math.abs(r-br)+Math.abs(g-bg)+Math.abs(b-bb);
+      const edge=Math.max(0,1-diff/0.35);
+      const a=sm*0.85*mk*edge;
+      r+=(br-r)*a;g+=(bg-g)*a;b+=(bb-b)*a;
+    }
+    if(sb!==0&&mk>0){const k=sb*0.25*mk;r+=k;g+=k;b+=k}
+    r*=ex;g*=ex;b*=ex;
+    r*=1+tp*0.3;b*=1-tp*0.3;g*=1-tn*0.2;r*=1+tn*0.1;b*=1+tn*0.1;
+    let l=0.2126*r+0.7152*g+0.0722*b;l=l<0?0:l>1?1:l;
+    const adj=sh*0.4*(1-l)*(1-l)+hi*0.4*l*l;
+    r+=adj;g+=adj;b+=adj;
+    r=(r-.5)*ct+.5;g=(g-.5)*ct+.5;b=(b-.5)*ct+.5;
+    const gr=0.2126*r+0.7152*g+0.0722*b;
+    const mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+    const s=mx>0?(mx-mn)/mx:0;
+    const f=sat*(1+vib*(1-s));
+    r=gr+(r-gr)*f;g=gr+(g-gr)*f;b=gr+(b-gr)*f;
+    o[p]=r*255;o[p+1]=g*255;o[p+2]=b*255;o[p+3]=255;
+  }
+}
+const outBuf=()=>ctx.createImageData(cv.width,cv.height);
+function render(){
+  if(!orig)return;
+  if(showOrig){ctx.putImageData(orig,0,0);return}
+  const out=outBuf();process(orig,pre,out);ctx.putImageData(out,0,0);
+}
+
+const hold=document.getElementById('cmp');
+['mousedown','touchstart'].forEach(e=>hold.addEventListener(e,ev=>{ev.preventDefault();showOrig=true;render()}));
+['mouseup','mouseleave','touchend','touchcancel'].forEach(e=>hold.addEventListener(e,()=>{if(showOrig){showOrig=false;render()}}));
+document.getElementById('mask').onclick=e=>{showMask=!showMask;e.target.textContent=showMask?'마스크 끄기':'피부 영역 보기';render()};
+document.getElementById('reset').onclick=()=>{
+  Object.assign(P,DEF);
+  side.querySelectorAll('input').forEach(i=>{i.value=DEF[i.dataset.k];i.nextElementSibling.textContent=i.value});render();
+};
+
+function blobToBase64(b){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(b)})}
+async function deliver(blob){
+  const name='edited_'+new Date().toISOString().replace(/[-:T]/g,'').slice(0,14)+'.jpg';
+  if(!NATIVE){
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();return;
+  }
+  const {Filesystem,Share}=window.Capacitor.Plugins;
+  const data=await blobToBase64(blob);
+  const w=await Filesystem.writeFile({path:name,data,directory:'CACHE'});
+  // 공유 시트에서 "갤러리/포토/드라이브" 등으로 저장
+  await Share.share({title:'편집한 사진',files:[w.uri],dialogTitle:'사진 저장 / 공유'});
+}
+
+const saveBtn=document.getElementById('save');
+saveBtn.onclick=()=>{
+  if(!fullImg){toast('먼저 사진을 열어주세요');return}
+  saveBtn.disabled=true;saveBtn.textContent='처리 중…';
+  setTimeout(async()=>{ // 버튼 상태가 먼저 그려지도록 한 틱 양보
+    try{
+      const s=Math.min(1,SAVE_MAX/Math.max(fullImg.naturalWidth,fullImg.naturalHeight));
+      const c=document.createElement('canvas');c.width=Math.round(fullImg.naturalWidth*s);c.height=Math.round(fullImg.naturalHeight*s);
+      const x=c.getContext('2d');x.drawImage(fullImg,0,0,c.width,c.height);
+      const src=x.getImageData(0,0,c.width,c.height);
+      const was=showMask;showMask=false;
+      const out=x.createImageData(c.width,c.height);process(src,prep(src),out);
+      showMask=was;x.putImageData(out,0,0);
+      const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.93));
+      await deliver(blob);
+    }catch(err){
+      if(!/cancel/i.test(String(err&&err.message)))toast('저장 실패: '+(err&&err.message||err));
+    }finally{saveBtn.disabled=false;saveBtn.textContent='JPEG 저장'}
+  },30);
+};
+</script>
+</body>
+</html>

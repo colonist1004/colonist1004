@@ -1,0 +1,19 @@
+{
+  "name": "photo-editor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "사진 편집기 (라이트룸 스타일) - Android APK",
+  "scripts": {
+    "sync": "cap sync android",
+    "apk": "cap sync android && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.3",
+    "@capacitor/core": "^6.2.3",
+    "@capacitor/filesystem": "^6.0.4",
+    "@capacitor/share": "^6.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.3"
+  }
+}
