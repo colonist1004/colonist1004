@@ -6,13 +6,18 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src blob:"
     />
-    <title>춤 만들기 — Desktop Dancer</title>
+    <title>춤·포즈 만들기 — Desktop Dancer</title>
     <link rel="stylesheet" href="studio.css" />
   </head>
   <body>
     <header>
-      <h1>춤 만들기</h1>
-      <p class="sub">춤 영상을 넣으면 캐릭터가 따라 출 수 있는 모션으로 바꿔 줍니다.</p>
+      <h1 id="title">춤 만들기</h1>
+      <div class="seg mode" id="mode">
+        <button data-v="dance" class="on">춤 (영상에서)</button>
+        <button data-v="pose">포즈 (사진에서)</button>
+      </div>
+      <p class="sub dance-only">춤 영상을 넣으면 캐릭터가 따라 출 수 있는 모션으로 바꿔 줍니다.</p>
+      <p class="sub pose-only">사진 속 사람의 자세를 알아내서, 캐릭터가 그 자세로 가만히 서 있게 합니다 (숨쉬기 정도만 움직여요).</p>
     </header>
 
     <!-- one-time setup -->
@@ -43,22 +48,25 @@
     <main id="main" hidden>
       <!-- 1. video -->
       <section class="card">
-        <h2><span class="step">1</span> 영상 고르기</h2>
+        <h2><span class="step">1</span> <span class="dance-only">영상 고르기</span><span class="pose-only">사진 고르기</span></h2>
         <label id="drop" class="drop" tabindex="0">
-          <input id="file" type="file" accept="video/*,.bvh" hidden />
-          <span class="drop-big">영상을 여기로 끌어 놓거나 클릭해서 선택</span>
-          <span class="drop-small">mp4, mov, webm 등 · 전신이 보이고 카메라가 고정된 영상이 잘 됩니다 · 다른 모캡 앱의 <b>.bvh</b> 파일도 됩니다</span>
+          <input id="file" type="file" accept="video/*,image/*,.bvh" hidden />
+          <span class="drop-big dance-only">영상을 여기로 끌어 놓거나 클릭해서 선택</span>
+          <span class="drop-small dance-only">mp4, mov, webm 등 · 전신이 보이고 카메라가 고정된 영상이 잘 됩니다 · 다른 모캡 앱의 <b>.bvh</b> 파일도 됩니다</span>
+          <span class="drop-big pose-only">사진을 여기로 끌어 놓거나 클릭해서 선택</span>
+          <span class="drop-small pose-only">jpg, png, webp · 몸 전체가 보이는 사진이 가장 잘 됩니다 · 다리가 안 보이면 다리는 서 있는 자세가 됩니다</span>
         </label>
-        <div class="row url-row">
+        <div id="photo-box" class="photo-box" hidden><img id="photo" alt="고른 사진" /></div>
+        <div class="row url-row dance-only">
           <input id="url" type="url" placeholder="또는 영상 주소(URL) 붙여넣기" />
           <button id="btn-url">불러오기</button>
         </div>
-        <p class="hint">URL은 본인에게 권리가 있는 영상에만 사용하세요 (유튜브 약관 주의).</p>
+        <p class="hint dance-only">URL은 본인에게 권리가 있는 영상에만 사용하세요 (유튜브 약관 주의).</p>
         <div id="bvh-box" class="result" hidden>
           <p id="bvh-text">BVH 모션 파일</p>
           <span class="muted">다른 모션캡처 도구에서 만든 동작입니다. 영상 인식 없이 그대로 캐릭터용으로 변환합니다.</span>
         </div>
-        <details class="adv">
+        <details class="adv dance-only">
           <summary>인식 결과가 마음에 안 들면: 더 정확한 무료 모캡 서비스</summary>
           <p class="hint">
             아래 서비스에서 같은 영상을 올려 <b>BVH</b>로 내려받은 뒤, 그 파일을 위 칸에 넣으면 됩니다. 그래픽카드와 상관없이
@@ -101,17 +109,17 @@
           <label for="name">이름</label>
           <input id="name" type="text" placeholder="내 춤" />
 
-          <span>반복 재생</span>
-          <label class="check"><input id="loop" type="checkbox" checked /> 끝과 시작을 자연스럽게 이어서 계속 반복</label>
+          <span class="dance-only">반복 재생</span>
+          <label class="check dance-only"><input id="loop" type="checkbox" checked /> 끝과 시작을 자연스럽게 이어서 계속 반복</label>
 
-          <span>움직임</span>
-          <div class="seg" id="root">
+          <span class="dance-only">움직임</span>
+          <div class="seg dance-only" id="root">
             <button data-v="planted" class="on">조금씩 이동</button>
             <button data-v="inplace">제자리</button>
           </div>
 
-          <span>부드럽게</span>
-          <div class="slider">
+          <span class="dance-only">부드럽게</span>
+          <div class="slider dance-only">
             <input id="smooth" type="range" min="0" max="2" step="0.25" value="1" />
             <span id="smooth-label">보통</span>
           </div>
@@ -127,7 +135,7 @@
           </div>
 
           <span>거울 영상</span>
-          <label class="check"><input id="mirror" type="checkbox" /> 좌우 반전 (거울 모드 안무 영상일 때)</label>
+          <label class="check"><input id="mirror" type="checkbox" /> 좌우 반전 <span class="dance-only">(거울 모드 안무 영상일 때)</span><span class="pose-only">(셀카·거울 사진일 때)</span></label>
 
           <label for="person">여러 명일 때</label>
           <select id="person">
@@ -139,7 +147,7 @@
           </select>
         </div>
 
-        <details class="adv">
+        <details class="adv dance-only">
           <summary>고급: 클라우드 GPU(GVHMR) 결과 사용</summary>
           <p class="hint">
             NVIDIA GPU 클라우드에서 <code>pipeline/cloud/run_gvhmr.sh</code>로 만든 <code>.npz</code>(또는

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Dance video -> VRMA motion for Desktop Dancer.
+"""Dance video -> VRMA motion for Desktop Dancer (or one photo -> a still pose).
 
   python extract_dance.py dance.mp4 --start 12 --end 40 --name my-dance
   python extract_dance.py "https://www.youtube.com/watch?v=..." --start 5 --end 25 --loop
   python extract_dance.py dance.mp4 --engine gvhmr --gvhmr-result gvhmr_dance.npz
+  python extract_dance.py photo.jpg --name peace      (-> peace.pose.vrma, a pose held still)
 
 The result goes into the app's motion library by default, so it shows up in the tray menu.
 """
@@ -53,7 +54,8 @@ def mirror_rotations(local):
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="춤 영상 → VRMA 모션 (Desktop Dancer)")
-    p.add_argument("input", help="영상 파일 경로, URL(yt-dlp로 내려받음) 또는 다른 모캡 도구의 .bvh 파일")
+    p.add_argument("input", help="영상 파일 경로, URL(yt-dlp로 내려받음), 다른 모캡 도구의 .bvh 파일, "
+                                 "또는 사진(jpg/png/webp: 그 자세를 그대로 취하는 포즈를 만듦)")
     p.add_argument("--start", type=float, help="시작 시간(초)")
     p.add_argument("--end", type=float, help="끝 시간(초)")
     p.add_argument("--name", help="모션 이름 (파일 이름). 기본: 영상 파일 이름")
@@ -80,15 +82,11 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def run_video(args, video):
-    from dancer_pipeline.lift import lift
+def _detect(args, frames, total):
+    """Pose detection with the chosen engine (RTMW3D, falling back to MediaPipe)."""
     from dancer_pipeline.pose_mediapipe import estimate
-    from dancer_pipeline.video import read_frames
 
-    frames = read_frames(video, args.start, args.end, args.fps)
-    _, info = next(frames)
-    fps, total = info["fps"], info["total"]
-    on_frame = lambda i: progress.stage("pose", i / total)  # noqa: E731
+    on_frame = lambda i: progress.stage("pose", i / max(total, 1))  # noqa: E731
     engine = "mediapipe"
     if args.engine == "rtm":
         progress.stage("model", 0, "RTMW3D 모델 준비 (그래픽카드 사용)")
@@ -101,15 +99,82 @@ def run_video(args, video):
             log(f"RTMW3D를 쓸 수 없어 MediaPipe로 진행합니다 ({type(e).__name__}: {e})")
     if engine == "rtm":
         progress.stage("pose", 0, f"동작 인식 중 · RTMW3D ({total} 프레임)")
-        kp, kp2d, valid, legs = pose_rtm.estimate(frames, fps, person=args.person, log=log, on_frame=on_frame, models=models)
+        kp, kp2d, valid, legs = pose_rtm.estimate(frames, fps_of(frames), person=args.person, log=log, on_frame=on_frame, models=models)
     else:
         progress.stage("model", 0, "MediaPipe 모델 준비")
         from dancer_pipeline.pose_mediapipe import model_path
 
         model_path(args.model, log)
         progress.stage("pose", 0, f"동작 인식 중 · MediaPipe ({total} 프레임)")
-        kp, kp2d, valid, legs = estimate(frames, fps, variant=args.model, person=args.person, log=log, on_frame=on_frame)
+        kp, kp2d, valid, legs = estimate(frames, fps_of(frames), variant=args.model, person=args.person, log=log, on_frame=on_frame)
     args.engine_used = engine
+    return kp, kp2d, valid, legs, engine
+
+
+def fps_of(frames):
+    return getattr(frames, "fps", 30.0)
+
+
+class _Frames:
+    """Frame iterator that also carries the frame rate."""
+
+    def __init__(self, it, fps):
+        self.it, self.fps = it, fps
+
+    def __iter__(self):
+        return iter(self.it)
+
+
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+
+
+def run_photo(args, path):
+    """One photo -> a still pose (a short clip that holds the pose)."""
+    import cv2
+
+    from dancer_pipeline.lift import lift
+
+    data = np.fromfile(str(path), np.uint8)  # (cv2.imread cannot open non-ASCII paths on Windows)
+    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if img is None:
+        raise SystemExit(f"사진을 읽지 못했습니다: {path}")
+    h, w = img.shape[:2]
+    if max(h, w) > 1600:  # the detectors work on small inputs anyway; huge photos only cost time
+        f = 1600 / max(h, w)
+        img = cv2.resize(img, (round(w * f), round(h * f)), interpolation=cv2.INTER_AREA)
+    rgb = np.ascontiguousarray(img[:, :, ::-1])
+    kp, kp2d, valid, legs, engine = _detect(args, _Frames([(0.0, rgb)], 30.0), 1)
+    if not valid[0]:
+        raise SystemExit("사진에서 사람을 찾지 못했습니다. 어깨와 골반이 보이는 사진을 써 주세요.")
+    progress.stage("post", 0, "자세 만드는 중")
+    if not args.no_lift and engine == "mediapipe":
+        kp = lift(kp, kp2d, 30.0)
+    kp = post.align_gravity(kp, min_deg=0 if engine == "mediapipe" else 12)
+    if args.mirror:
+        kp = mirror_keypoints(kp)
+    local = keypoints_to_rotations(kp, hand_weight=args.hands)
+    seen = post.legs_seen(legs, valid)
+    if args.mirror:
+        seen = {"left": seen["right"], "right": seen["left"]}
+    local, replaced = post.stand_unseen_legs(local, seen, 30.0)
+    for side, share in replaced.items():
+        if share > 0:
+            log(f"{'왼' if side == 'left' else '오른'}다리가 사진에 안 보여서 서 있는 자세로 둡니다")
+    hips_y = post.ground_per_frame(local, 30.0)
+    # hold the pose: two identical keys one second apart
+    local = {b: np.repeat(m, 2, axis=0) for b, m in local.items()}
+    root = np.repeat(post.compose_root(np.zeros((1, 2)), hips_y), 2, axis=0)
+    return 1.0, local, root, {"kind": "pose", "detected_ratio": 1.0}
+
+
+def run_video(args, video):
+    from dancer_pipeline.lift import lift
+    from dancer_pipeline.video import read_frames
+
+    frames = read_frames(video, args.start, args.end, args.fps)
+    _, info = next(frames)
+    fps, total = info["fps"], info["total"]
+    kp, kp2d, valid, legs, engine = _detect(args, _Frames(frames, fps), total)
     n = len(valid)
     if n < 2:
         raise SystemExit("처리할 프레임이 없습니다 (시간 범위를 확인하세요)")
@@ -260,6 +325,9 @@ def _main(args):
 
     if str(video).lower().endswith(".bvh"):
         fps, local, root, extra = run_bvh(args, video)
+    elif str(video).lower().endswith(IMAGE_EXT):
+        fps, local, root, extra = run_photo(args, video)
+        args.loop = False
     elif args.engine == "gvhmr":
         fps, local, root, extra = run_gvhmr(args)
     else:
@@ -273,7 +341,7 @@ def _main(args):
     out = Path(args.out) if args.out else motions_dir()
     if out.suffix.lower() != ".vrma":
         out.mkdir(parents=True, exist_ok=True)
-        out = out / f"{name}.vrma"
+        out = out / (f"{name}.pose.vrma" if extra.get("kind") == "pose" else f"{name}.vrma")
     else:
         out.parent.mkdir(parents=True, exist_ok=True)
 

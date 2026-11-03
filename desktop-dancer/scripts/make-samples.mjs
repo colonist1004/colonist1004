@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { GltfBuilder } from './gltf-writer.mjs';
 import { BONES, BONE_MAP, addSkeletonNodes } from './skeleton.mjs';
 import { poseAt, eulerXYZ, LOOP_SECONDS, FPS } from './dance.mjs';
+import { POSES } from './poses.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ARRAY_BUFFER = 34962;
@@ -151,17 +152,16 @@ function makeMannequin() {
 
 // ------------------------------------------------------------ sample-dance.vrma
 
-function makeDance() {
+/** VRMA from a pose function: frames at `fps`, poseFn(t) -> { hipsPosition, rotations }. */
+function makeClip(name, frames, fps, poseFn) {
   const b = new GltfBuilder();
   const nodes = addSkeletonNodes(b);
-  const frames = LOOP_SECONDS * FPS + 1; // last frame == first frame for a clean loop
   const times = new Float32Array(frames);
   const rot = {};
   const hips = new Float32Array(frames * 3);
   for (let f = 0; f < frames; f++) {
-    const t = (f / FPS) % LOOP_SECONDS;
-    times[f] = f / FPS;
-    const pose = poseAt(t, BONE_MAP.hips.pos[1]);
+    times[f] = f / fps;
+    const pose = poseFn(f / fps);
     hips.set(pose.hipsPosition, f * 3);
     for (const [bone, e] of Object.entries(pose.rotations)) {
       (rot[bone] ||= new Float32Array(frames * 4)).set(eulerXYZ(...e), f * 4);
@@ -177,7 +177,7 @@ function makeDance() {
   };
   add(nodes.hips, 'translation', hips, 'VEC3');
   for (const [bone, data] of Object.entries(rot)) add(nodes[bone], 'rotation', data, 'VEC4');
-  b.json.animations = [{ name: 'sample-dance', samplers, channels }];
+  b.json.animations = [{ name, samplers, channels }];
 
   b.json.extensionsUsed = ['VRMC_vrm_animation'];
   b.json.extensions = {
@@ -190,4 +190,16 @@ function makeDance() {
 }
 
 write('assets/characters/mannequin.vrm', makeMannequin());
+function makeDance() {
+  // last frame == first frame for a clean loop
+  return makeClip('sample-dance', LOOP_SECONDS * FPS + 1, FPS, (t) => poseAt(t % LOOP_SECONDS, BONE_MAP.hips.pos[1]));
+}
+
+/** A still pose: two identical keys one second apart (the app adds breathing). */
+function makePose(name, { hipsY = null, rotations }) {
+  const hipsPosition = [0, hipsY ?? BONE_MAP.hips.pos[1], 0];
+  return makeClip(name, 2, 1, () => ({ hipsPosition, rotations }));
+}
+
 write('assets/motions/sample-dance.vrma', makeDance());
+for (const [name, pose] of Object.entries(POSES)) write(`assets/motions/${name}.pose.vrma`, makePose(name, pose));

@@ -228,7 +228,9 @@ const safeName = (s) =>
 function buildArgs(o, outDir) {
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   if (typeof o.input !== 'string' || !o.input) throw new Error('영상을 선택하세요');
-  const args = [o.input, '--out', path.join(outDir, `${safeName(o.name)}.vrma`), '--name', safeName(o.name)];
+  const photo = /\.(jpe?g|png|webp|bmp)$/i.test(o.input);
+  const file = `${safeName(o.name)}${photo ? '.pose' : ''}.vrma`;
+  const args = [o.input, '--out', path.join(outDir, file), '--name', safeName(o.name)];
   if (num(o.start) != null) args.push('--start', String(o.start));
   if (num(o.end) != null) args.push('--end', String(o.end));
   if (o.loop) args.push('--loop');

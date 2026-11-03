@@ -30,6 +30,7 @@ let settings = { fps: 30, speed: 1 };
 let vrm = null;
 let mixer = null;
 let vrmAnimation = null;
+let holdingPose = false; // the motion is a still pose: add breathing so it does not look frozen
 let viewHeight = 2;
 let loadToken = 0;
 
@@ -99,13 +100,51 @@ function disposeCharacter() {
 
 function applyMotion() {
   if (!vrm) return;
+  for (const [n, { base, after }] of breathState) if (n.quaternion.equals(after)) n.quaternion.copy(base);
+  breathState.clear();
   mixer?.stopAllAction();
   mixer = null;
   if (!vrmAnimation) return;
   mixer = new THREE.AnimationMixer(vrm.scene);
   const clip = createVRMAnimationClip(vrmAnimation, vrm);
+  holdingPose = isStill(clip);
   mixer.clipAction(clip).setLoop(THREE.LoopRepeat, Infinity).play();
   mixer.timeScale = settings.speed;
+}
+
+/** True when no track of the clip changes over time (a pose made from a photo). */
+function isStill(clip) {
+  return clip.tracks.every((t) => {
+    const n = t.getValueSize();
+    for (let i = n; i < t.values.length; i++) if (Math.abs(t.values[i] - t.values[i % n]) > 1e-4) return false;
+    return true;
+  });
+}
+
+const _q = new THREE.Quaternion();
+const breathState = new Map();
+const _e = new THREE.Euler();
+function breathe(t) {
+  // Small enough to keep the pose, enough to look alive: chest rise, a slow head drift, weight shift.
+  const h = vrm.humanoid;
+  const add = (bone, x, y, z) => {
+    const n = h.getNormalizedBoneNode(bone);
+    if (!n) return;
+    // Bones the clip drives are reset by the mixer every frame; others still hold last frame's breath.
+    const prev = breathState.get(n);
+    if (prev && n.quaternion.equals(prev.after)) n.quaternion.copy(prev.base);
+    const base = n.quaternion.clone();
+    n.quaternion.multiply(_q.setFromEuler(_e.set(x, y, z)));
+    breathState.set(n, { base, after: n.quaternion.clone() });
+  };
+  const b = Math.sin(t * 1.6);
+  add('chest', -0.025 * b, 0, 0);
+  add('upperChest', -0.015 * b, 0, 0);
+  add('neck', 0.012 * b, 0.02 * Math.sin(t * 0.37), 0);
+  add('head', 0, 0.025 * Math.sin(t * 0.29 + 1), 0.015 * Math.sin(t * 0.23));
+  add('hips', 0, 0, 0.008 * Math.sin(t * 0.5));
+  add('leftUpperArm', 0, 0, 0.02 * b);
+  add('rightUpperArm', 0, 0, -0.02 * b);
 }
 
 let currentCharacter = null;
@@ -253,6 +292,7 @@ function tick() {
     if (mixer && freezeT != null) mixer.setTime(freezeT);
     else if (mixer) mixer.update(delta);
     else idlePose(clock.elapsedTime);
+    if (mixer && holdingPose && freezeT == null) breathe(clock.elapsedTime);
     vrm.update(delta);
   }
   renderer.render(scene, camera);

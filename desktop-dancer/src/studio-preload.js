@@ -21,4 +21,5 @@ contextBridge.exposeInMainWorld('studio', {
   cancel: () => ipcRenderer.invoke('studio:cancel'),
   apply: (p) => ipcRenderer.invoke('studio:apply', p),
   openFolder: () => ipcRenderer.invoke('studio:open-folder'),
+  onMode: (cb) => subscribe('studio:mode', cb),
 });

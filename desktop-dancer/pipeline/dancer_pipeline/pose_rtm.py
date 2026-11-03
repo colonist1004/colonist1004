@@ -142,7 +142,9 @@ def to_keypoints(k2, z, valid):
     # Depth scale: bones keep their length, so pick the depth scale that makes the 3D bone lengths
     # most constant over the clip (a rough "torso = 0.5 m" guess is only the starting point).
     torso_px = np.median(np.linalg.norm((img[v][:, 5] + img[v][:, 6]) / 2 - (img[v][:, 11] + img[v][:, 12]) / 2, axis=1))
-    zs = z * (torso_px / 0.5) * _depth_scale(img[v], z[v] * (torso_px / 0.5))
+    zs = z * (torso_px / 0.5)
+    if v.sum() >= 5:  # needs motion: a single photo keeps the model's own scale
+        zs = zs * _depth_scale(img[v], z[v] * (torso_px / 0.5))
     # sign: facing the camera <=> the person's left shoulder is on the image right
     facing = v & (k2[:, 5, 0] > k2[:, 6, 0])
     sel = facing if facing.sum() >= 3 else v

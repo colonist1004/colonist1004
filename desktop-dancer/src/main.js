@@ -224,9 +224,12 @@ function trayIcon() {
   return nativeImage.createFromBitmap(buf, { width: size, height: size });
 }
 
-function libraryMenu(kind, ext, current, key) {
-  const items = listLibrary(kind, ext).map((file) => ({
-    label: path.basename(file, path.extname(file)),
+// Still poses (made from a photo) are motions too, named <name>.pose.vrma.
+const isPose = (file) => /\.pose\.vrma$/i.test(file);
+
+function libraryMenu(kind, ext, current, key, filter = () => true) {
+  const items = listLibrary(kind, ext).filter(filter).map((file) => ({
+    label: path.basename(file, path.extname(file)).replace(/\.pose$/i, ''),
     type: 'radio',
     checked: file === current,
     click: () => {
@@ -293,7 +296,8 @@ function rebuildTrayMenu() {
   const primaryId = screen.getPrimaryDisplay().id;
   const menu = Menu.buildFromTemplate([
     { label: s.visible ? '숨기기' : '보이기', click: () => setVisible(!s.visible) },
-    { label: '춤 만들기 (영상에서)…', click: openStudio },
+    { label: '춤 만들기 (영상에서)…', click: () => openStudio('dance') },
+    { label: '포즈 만들기 (사진에서)…', click: () => openStudio('pose') },
     { label: '캐릭터 만들기 (그림에서)…', click: openCharStudio },
     { type: 'separator' },
     {
@@ -308,9 +312,17 @@ function rebuildTrayMenu() {
     {
       label: '춤',
       submenu: [
-        ...libraryMenu('motions', '.vrma', motion, 'motion'),
+        ...libraryMenu('motions', '.vrma', motion, 'motion', (f) => !isPose(f)),
         { type: 'separator' },
         { label: 'VRMA 파일 추가…', click: () => importFile('motions', '.vrma', 'motion', 'VRMA 모션 추가') },
+      ],
+    },
+    {
+      label: '포즈',
+      submenu: [
+        ...libraryMenu('motions', '.vrma', motion, 'motion', isPose),
+        { type: 'separator' },
+        { label: '사진으로 포즈 만들기…', click: () => openStudio('pose') },
       ],
     },
     {
@@ -535,10 +547,12 @@ ipcMain.on('renderer-error', (_e, msg) => {
 
 // ------------------------------------------------------------ 춤 만들기 window
 
-function openStudio() {
+function openStudio(mode = 'dance') {
+  if (typeof mode !== 'string') mode = 'dance';
   if (studio) {
     studio.show();
     studio.focus();
+    studio.webContents.send('studio:mode', mode);
     return;
   }
   studio = new BrowserWindow({
@@ -546,7 +560,7 @@ function openStudio() {
     height: 900,
     minWidth: 560,
     minHeight: 500,
-    title: '춤 만들기 — Desktop Dancer',
+    title: '춤·포즈 만들기 — Desktop Dancer',
     autoHideMenuBar: true,
     backgroundColor: '#f4f5f8',
     webPreferences: {
@@ -556,7 +570,7 @@ function openStudio() {
       sandbox: true,
     },
   });
-  studio.loadFile(path.join(__dirname, 'studio', 'index.html'));
+  studio.loadFile(path.join(__dirname, 'studio', 'index.html'), { query: { mode } });
   // Links never open inside the app.
   studio.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   studio.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -802,7 +816,7 @@ if (!app.requestSingleInstanceLock()) {
     }, 5000);
   });
 
-  if (process.env.DANCER_OPEN_STUDIO) app.whenReady().then(() => setTimeout(openStudio, 300));
+  if (process.env.DANCER_OPEN_STUDIO) app.whenReady().then(() => setTimeout(() => openStudio(process.env.DANCER_OPEN_STUDIO === 'pose' ? 'pose' : 'dance'), 300));
   if (process.env.DANCER_OPEN_PLACE) app.whenReady().then(() => setTimeout(openPlaceWindow, 300));
   if (process.env.DANCER_OPEN_CHAR) app.whenReady().then(() => setTimeout(openCharStudio, 300));
 

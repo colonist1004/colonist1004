@@ -10,6 +10,8 @@ const state = {
   root: 'planted',
   model: 'rtm',
   bvh: false,
+  photo: false,
+  mode: 'dance', // 'dance' (video -> motion) or 'pose' (photo -> still pose)
   gvhmr: null,
   result: null,
   running: false,
@@ -82,13 +84,75 @@ $('btn-setup').onclick = async () => {
   const r = await api.setup();
   off();
   if (r.ok) {
-    await checkSetup();
+    await setMode(new URLSearchParams(location.search).get('mode') || 'dance');
+checkSetup();
   } else {
     logEl.textContent += `\n설치 실패: ${r.error}\n인터넷 연결을 확인하고 다시 시도하세요.`;
     $('btn-setup').disabled = false;
     $('btn-setup').textContent = '다시 시도';
   }
 };
+
+// --------------------------------------------------------------------- mode
+
+const IMAGE_RE = /\.(jpe?g|png|webp|bmp)$/i;
+
+function setMode(mode) {
+  mode = mode === 'pose' ? 'pose' : 'dance';
+  if (mode === state.mode && document.body.dataset.ready) return;
+  document.body.dataset.ready = '1';
+  state.mode = mode;
+  document.body.classList.toggle('pose', mode === 'pose');
+  for (const b of $('mode').querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === mode);
+  $('title').textContent = mode === 'pose' ? '포즈 만들기' : '춤 만들기';
+  document.title = `${mode === 'pose' ? '포즈' : '춤'} 만들기 — Desktop Dancer`;
+  $('name').placeholder = mode === 'pose' ? '내 포즈' : '내 춤';
+  $('btn-run').textContent = mode === 'pose' ? '포즈 만들기' : '춤 만들기';
+  $('btn-apply').textContent = mode === 'pose' ? '지금 이 포즈 취하게 하기' : '지금 춤추게 하기';
+  // what was picked for the other mode does not carry over
+  if ((mode === 'pose') !== state.photo && state.input) clearInput();
+  hideOutcome();
+  updateRunButton();
+}
+
+function clearInput() {
+  if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+  state.objectUrl = null;
+  state.input = null;
+  state.photo = false;
+  state.bvh = false;
+  video.removeAttribute('src');
+  $('photo').removeAttribute('src');
+  show('video-box', false);
+  show('photo-box', false);
+  show('bvh-box', false);
+  if ($('name').dataset.auto === '1') $('name').value = '';
+}
+
+$('mode').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b) setMode(b.dataset.v);
+});
+api.onMode?.(setMode);
+
+function usePhoto(file, p) {
+  if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+  state.objectUrl = URL.createObjectURL(file);
+  state.input = p;
+  state.photo = true;
+  state.bvh = false;
+  video.removeAttribute('src');
+  show('video-box', false);
+  show('bvh-box', false);
+  $('photo').src = state.objectUrl;
+  show('photo-box', true);
+  if (!$('name').value || $('name').dataset.auto === '1') {
+    $('name').value = file.name.replace(/\.[^.]+$/, '');
+    $('name').dataset.auto = '1';
+  }
+  hideOutcome();
+  updateRunButton();
+}
 
 // -------------------------------------------------------------------- video
 
@@ -99,7 +163,9 @@ function loadVideo(src, input, name) {
   state.objectUrl = src;
   state.input = input;
   state.bvh = false;
+  state.photo = false;
   show('bvh-box', false);
+  show('photo-box', false);
   video.src = src;
   show('video-box', true);
   if (!$('name').value || $('name').dataset.auto === '1') {
@@ -114,12 +180,20 @@ function useFile(file) {
   if (!file) return;
   const p = api.pathForFile(file);
   if (!p) return showError('이 파일의 경로를 알 수 없습니다. 다른 방법으로 선택해 보세요.');
+  if (IMAGE_RE.test(file.name) || /^image\//.test(file.type)) {
+    if (!IMAGE_RE.test(file.name)) return showError('jpg, png, webp, bmp 사진을 써 주세요.');
+    setMode('pose');
+    return usePhoto(file, p);
+  }
+  setMode('dance');
   if (/\.bvh$/i.test(file.name)) {
     // Motion capture file from another tool: no video, no range, convert as is.
     video.removeAttribute('src');
     show('video-box', false);
     state.input = p;
     state.bvh = true;
+    state.photo = false;
+    show('photo-box', false);
     state.duration = 0;
     $('bvh-text').textContent = `BVH 모션 파일: ${file.name}`;
     show('bvh-box', true);
@@ -254,6 +328,10 @@ $('btn-gvhmr-clear').onclick = () => {
 // ---------------------------------------------------------------------- run
 
 function updateRunButton() {
+  if (state.mode === 'pose') {
+    $('btn-run').disabled = state.running || !(state.input && state.photo);
+    return;
+  }
   const hasVideo = !!state.input && (state.bvh || state.end > state.start);
   $('btn-run').disabled = state.running || !(hasVideo || state.gvhmr);
 }
@@ -286,19 +364,22 @@ $('btn-run').onclick = async () => {
   updateRunButton();
   show('btn-cancel', true);
   setProgress(0, '시작하는 중…');
+  const pose = state.mode === 'pose';
   const opts = {
     input: state.input || 'gvhmr-only',
-    name: $('name').value.trim() || 'dance',
+    name: $('name').value.trim() || (pose ? 'pose' : 'dance'),
     loop: $('loop').checked,
     mirror: $('mirror').checked,
     root: state.gvhmr && $('root-original').checked ? 'original' : state.root,
     smooth: Number($('smooth').value),
     model: state.model,
     person: $('person').value === '' ? null : Number($('person').value),
-    engine: state.gvhmr ? 'gvhmr' : state.model === 'rtm' ? 'rtm' : 'mediapipe',
-    gvhmrResult: state.gvhmr,
+    engine: !pose && state.gvhmr ? 'gvhmr' : state.model === 'rtm' ? 'rtm' : 'mediapipe',
+    gvhmrResult: pose ? null : state.gvhmr,
   };
-  if (state.input && state.duration) {
+  if (pose) {
+    opts.loop = false;
+  } else if (state.input && state.duration) {
     if (state.start > 0.05) opts.start = Number(state.start.toFixed(2));
     if (state.end < state.duration - 0.05) opts.end = Number(state.end.toFixed(2));
   }
@@ -310,7 +391,9 @@ $('btn-run').onclick = async () => {
     setProgress(1, '완료');
     state.result = r.out;
     const detected = r.detected != null ? ` · 사람 인식 ${Math.round(r.detected * 100)}%` : '';
-    $('result-text').textContent = `완성! “${opts.name}” (${r.duration?.toFixed(1)}초${detected})`;
+    $('result-text').textContent = pose
+      ? `완성! 포즈 “${opts.name}” · 트레이 메뉴 → 포즈 에도 들어갔어요`
+      : `완성! “${opts.name}” (${r.duration?.toFixed(1)}초${detected})`;
     show('result', true);
   } else {
     show('progress', false);
@@ -323,8 +406,9 @@ for (const b of document.querySelectorAll('[data-link]')) b.onclick = () => api.
 $('btn-apply').onclick = async () => {
   await api.apply(state.result);
   $('btn-apply').textContent = '적용했어요 ✓';
-  setTimeout(() => ($('btn-apply').textContent = '지금 춤추게 하기'), 2000);
+  setTimeout(() => ($('btn-apply').textContent = state.mode === 'pose' ? '지금 이 포즈 취하게 하기' : '지금 춤추게 하기'), 2000);
 };
 $('btn-folder').onclick = () => api.openFolder();
 
+setMode(new URLSearchParams(location.search).get('mode') || 'dance');
 checkSetup();
