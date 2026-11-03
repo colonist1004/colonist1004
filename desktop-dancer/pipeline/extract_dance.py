@@ -101,14 +101,14 @@ def run_video(args, video):
             log(f"RTMW3D를 쓸 수 없어 MediaPipe로 진행합니다 ({type(e).__name__}: {e})")
     if engine == "rtm":
         progress.stage("pose", 0, f"동작 인식 중 · RTMW3D ({total} 프레임)")
-        kp, kp2d, valid = pose_rtm.estimate(frames, fps, person=args.person, log=log, on_frame=on_frame, models=models)
+        kp, kp2d, valid, legs = pose_rtm.estimate(frames, fps, person=args.person, log=log, on_frame=on_frame, models=models)
     else:
         progress.stage("model", 0, "MediaPipe 모델 준비")
         from dancer_pipeline.pose_mediapipe import model_path
 
         model_path(args.model, log)
         progress.stage("pose", 0, f"동작 인식 중 · MediaPipe ({total} 프레임)")
-        kp, kp2d, valid = estimate(frames, fps, variant=args.model, person=args.person, log=log, on_frame=on_frame)
+        kp, kp2d, valid, legs = estimate(frames, fps, variant=args.model, person=args.person, log=log, on_frame=on_frame)
     args.engine_used = engine
     n = len(valid)
     if n < 2:
@@ -131,6 +131,13 @@ def run_video(args, video):
     kp = {k: post.gaussian_smooth(v, sigma) for k, v in kp.items()}
     local = keypoints_to_rotations(kp, hand_weight=args.hands)
     local = post.smooth_rotations(local, 0.75 * args.smooth * fps / 30)
+    seen = post.legs_seen(legs, valid, fps)
+    if args.mirror:
+        seen = {"left": seen["right"], "right": seen["left"]}
+    local, replaced = post.stand_unseen_legs(local, seen, fps)
+    for side, share in replaced.items():
+        if share > 0.02:
+            log(f"{'왼' if side == 'left' else '오른'}다리가 화면에 안 보이는 구간 {share * 100:.0f}%: 그동안은 서 있는 자세로 둡니다")
 
     if args.root == "original":
         raise SystemExit("--root original 은 gvhmr 엔진에서만 됩니다 (MediaPipe는 전역 이동을 모름)")

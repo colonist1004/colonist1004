@@ -58,7 +58,7 @@ def estimate(frames, fps, variant="heavy", person=None, max_people=4, min_visibi
         min_pose_presence_confidence=0.5,
         min_tracking_confidence=0.5,
     )
-    world, image, valid = [], [], []
+    world, image, valid, legs = [], [], [], {"left": [], "right": []}
     prev_center = None
     last_ts = -1
     with vision.PoseLandmarker.create_from_options(opts) as lm:
@@ -85,6 +85,8 @@ def estimate(frames, fps, variant="heavy", person=None, max_people=4, min_visibi
                 world.append(np.zeros((33, 3)))
                 image.append(np.zeros((33, 2)))
                 valid.append(False)
+                for side in legs:
+                    legs[side].append([False, False])
             else:
                 w = np.array([[l.x, l.y, l.z] for l in res.pose_world_landmarks[chosen]]) @ MP_TO_VRM.T
                 vis = np.array([l.visibility for l in res.pose_world_landmarks[chosen]])
@@ -96,9 +98,13 @@ def estimate(frames, fps, variant="heavy", person=None, max_people=4, min_visibi
                 image.append(img)
                 # core joints must be seen; hands/feet can be filled from neighbors
                 valid.append(bool(np.all(vis[[11, 12, 23, 24]] > min_visibility)))
+                # knee and ankle really seen: confident and inside the picture (else MediaPipe guesses them)
+                norm = res.pose_landmarks[chosen]
+                for side, ks in (("left", (25, 27)), ("right", (26, 28))):
+                    legs[side].append([vis[k] > 0.3 and -0.02 < norm[k].x < 1.02 and -0.02 < norm[k].y < 1.0 for k in ks])
             if on_frame and i % 5 == 0:
                 on_frame(i)
     world, image = np.array(world), np.array(image)
     kp = {name: world[:, k] for k, name in enumerate(MP_NAMES)}
     kp2d = {name: image[:, k] for k, name in enumerate(MP_NAMES)}
-    return kp, kp2d, np.array(valid)
+    return kp, kp2d, np.array(valid), {k: np.array(v, bool).reshape(-1, 2) for k, v in legs.items()}

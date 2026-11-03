@@ -162,6 +162,64 @@ def test_autorig_unrigged_mesh():
         assert info["options"]["autorig"] and info["bones"]["leftHand"] == "leftHand"
 
 
+def _cut_body(min_y, drop_left_hand=False):
+    """Surface points and joints of the synthetic body, with everything below min_y removed (a model made
+    from a photo that ends at the shins or the waist) and optionally the left hand cut off."""
+    from dancer_pipeline.char.autorig import sample_surface
+
+    m, idx = synthetic_model(prop=False)
+    p = m.prims[0]
+    S = sample_surface(p.positions, p.indices.reshape(-1, 3), n=60000)
+    J = {n: REST_POS[n].astype(float).copy() for n in BONES}
+    J["upperChest"] = (J["chest"] + J["neck"]) / 2  # (not in the reference skeleton)
+    for s in ("left", "right"):
+        J[f"{s}HandTip"] = J[f"{s}Hand"] + 0.5 * (J[f"{s}Hand"] - J[f"{s}LowerArm"])
+    keep = S[:, 1] >= min_y
+    if drop_left_hand:
+        keep &= S[:, 0] < (J["leftLowerArm"][0] + J["leftHand"][0]) / 2
+    H = np.ptp(S[:, 1])  # the whole body: the pose detector "sees" these joints whatever is cut
+    return S[keep], J, H
+
+
+def test_fit_to_mesh_legs_cut_at_the_shins():
+    from dancer_pipeline.char.autorig import fit_to_mesh
+
+    cut = (REST_POS["leftLowerLeg"][1] + REST_POS["leftFoot"][1]) / 2
+    S, J, H = _cut_body(cut)
+    knee = J["leftLowerLeg"].copy()
+    loose = fit_to_mesh(S, J, H)
+    assert {"leftFoot", "rightFoot", "leftToes", "rightToes"} <= loose, loose
+    assert not loose & {"leftUpperLeg", "leftLowerLeg", "hips"}, loose
+    for s in ("left", "right"):
+        assert J[f"{s}Foot"][1] >= cut - 0.03, J[f"{s}Foot"]  # ankle pulled up into the model
+        assert J[f"{s}LowerLeg"][1] > J[f"{s}Foot"][1] + 0.05  # knee stays above the ankle
+    assert J["leftLowerLeg"][1] > knee[1]  # knee moved up with the shorter leg
+
+
+def test_fit_to_mesh_upper_body_only_and_cut_hand():
+    from dancer_pipeline.char.autorig import fit_to_mesh, skin_weights
+
+    S, J, H = _cut_body(REST_POS["hips"][1] - 0.02, drop_left_hand=True)
+    loose = fit_to_mesh(S, J, H)
+    legs = {f"{s}{b}" for s in ("left", "right") for b in ("UpperLeg", "LowerLeg", "Foot", "Toes")}
+    assert legs <= loose, loose
+    assert "leftHand" in loose and "rightHand" not in loose, loose
+    assert J["leftHand"][0] < REST_POS["leftHand"][0] - 0.02  # pulled back into the forearm
+    # the mesh a missing bone would have taken goes to a bone that is there
+    from dancer_pipeline.char.autorig import BONE_ORDER
+
+    F = np.zeros((0, 3), np.int64)
+    J["leftToes"], J["rightToes"] = J["leftFoot"] + [0, 0, 0.05], J["rightFoot"] + [0, 0, 0.05]
+    for s in ("left", "right"):
+        J[f"{s}ToeTip"] = J[f"{s}Toes"] + [0, 0, 0.05]
+    J["headTop"] = J["head"] + [0, 0.15, 0]
+    W, I = skin_weights(S[::20], F, J, iters=1, loose=loose)
+    names = [n for n, _ in BONE_ORDER]
+    used = {names[i] for i in np.unique(I[W > 0])}
+    assert not used & loose, used & loose
+    assert {"hips", "leftLowerArm", "rightHand"} <= used, used
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

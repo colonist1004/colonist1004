@@ -62,6 +62,48 @@ def smooth_rotations(local: dict, sigma: float) -> dict:
     return out
 
 
+def legs_seen(points: dict, valid: np.ndarray, fps: float = 30.0, min_gap: float = 0.3) -> dict:
+    """points: side -> (F, k) bool (knee/ankle confidently detected inside the picture).
+    Returns side -> (F,) bool; frames without a person take the nearest frame's answer, and dips
+    shorter than `min_gap` seconds (fast moves blur a foot for a moment) count as seen."""
+    out = {}
+    for side, ok in points.items():
+        seen = np.all(ok, axis=1).astype(np.float64)
+        seen = fill_gaps(seen, valid) > 0.5 if valid.any() else seen > 0.5
+        for a, b in _intervals(~seen):
+            if b - a < min_gap * fps:
+                seen[a:b] = True
+        out[side] = seen
+    return out
+
+
+def stand_unseen_legs(local: dict, seen: dict, fps: float, fade: float = 0.25) -> tuple[dict, dict]:
+    """While a leg is out of the picture (or hidden), the detector only guesses it, and the guess flails.
+    Ease that leg into standing straight under the hips instead (facing where the hips face), and back
+    when it is seen again. Returns (local, share of frames where each leg was replaced)."""
+    out = dict(local)
+    hips = local["hips"]
+    # standing: thigh straight down in world space, turned with the hips around the vertical only
+    f = hips[:, :, 2] * np.array([1.0, 0.0, 1.0])
+    f = normalize(np.where(np.linalg.norm(f, axis=1, keepdims=True) < 1e-6, [0.0, 0.0, 1.0], f))
+    yaw = np.stack([np.cross([0.0, 1.0, 0.0], f), np.broadcast_to([0.0, 1.0, 0.0], f.shape), f], axis=-1)
+    stand_upper = np.swapaxes(hips, -1, -2) @ yaw
+    eye = np.broadcast_to(np.eye(3), hips.shape)
+    replaced = {}
+    for side, ok in seen.items():
+        w = gaussian_smooth((~ok).astype(np.float64), fade * fps / 2)
+        w = np.clip(np.where(~ok, 1.0, 2 * w), 0, 1)  # fully standing whenever unseen, easing in around it
+        w[w < 0.02] = 0
+        replaced[side] = float((~ok).mean())
+        if not (~ok).any():
+            continue
+        for bone, target in ((f"{side}UpperLeg", stand_upper), (f"{side}LowerLeg", eye), (f"{side}Foot", eye)):
+            a = local[bone]
+            rel = np.swapaxes(a, -1, -2) @ target
+            out[bone] = a @ matrix_power(rel, w)
+    return out, replaced
+
+
 # --------------------------------------------------------------- alignment
 
 def align_gravity(kp: dict, min_deg: float = 12.0) -> dict:

@@ -50,9 +50,11 @@ def densify(model: Model, colors):
     return np.concatenate(P), np.concatenate(C)
 
 
-def render(P, C, yaw, size=512, light=True):
+def render(P, C, yaw, size=512, light=True, frame=None):
     """Orthographic view from direction `yaw` (radians, 0 = looking at the +Z face from +Z).
-    Returns (rgb uint8 image, pixel->world mapping function, depth image)."""
+    `frame` = (axis (x, z), y_low, span) zooms onto a region (a vertical axis in world space, the
+    bottom of the view and its size); by default the view fits the whole model.
+    Returns (rgb uint8 image, pixel->world mapping function, depth image, view info)."""
     c, s = np.cos(yaw), np.sin(yaw)
     # camera axes: right, up, toward-camera
     right = np.array([c, 0, -s])
@@ -60,10 +62,16 @@ def render(P, C, yaw, size=512, light=True):
     x = P @ right
     y = P[:, 1]
     z = P @ fwd
-    lo = np.array([x.min(), y.min()])
-    span = max(x.max() - x.min(), y.max() - y.min()) * 1.1
-    pad = (np.array([span, span]) - np.array([x.max() - x.min(), y.max() - y.min()])) / 2
-    origin = lo - pad
+    if frame is None:
+        lo = np.array([x.min(), y.min()])
+        span = max(x.max() - x.min(), y.max() - y.min()) * 1.1
+        pad = (np.array([span, span]) - np.array([x.max() - x.min(), y.max() - y.min()])) / 2
+        origin = lo - pad
+    else:
+        axis, y_low, span = frame
+        origin = np.array([axis[0] * right[0] + axis[1] * right[2] - span / 2, y_low])
+        inside = (x >= origin[0]) & (x <= origin[0] + span) & (y >= origin[1]) & (y <= origin[1] + span)
+        P, C, x, y, z = P[inside], C[inside], x[inside], y[inside], z[inside]
     px = ((x - origin[0]) / span * (size - 1)).astype(int)
     py = ((1 - (y - origin[1]) / span) * (size - 1)).astype(int)
     img = np.full((size, size, 3), 0.55)

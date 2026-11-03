@@ -85,6 +85,15 @@ def _main(a, pr):
     pr.log(f"{len(model.joint_names)} bones, {tris} triangles, {len(model.images)} textures")
 
     autorigged = bool(a.autorig or model.extras.get("unrigged"))
+    mapping = None
+    if not autorigged:
+        pr.stage("map", 0, "뼈대 분석 중 (머리·팔·다리 찾기)")
+        try:
+            mapping = find_humanoid(model)
+        except MappingError as e:
+            # e.g. the photo did not show the legs, so the rig has none: rig it again here instead
+            pr.log(f"기존 뼈대를 쓸 수 없어 자동 리깅으로 다시 합니다 ({e})")
+            autorigged = True
     if autorigged:
         from dancer_pipeline.char.autorig import autorig
         from dancer_pipeline.char.humanoid import Mapping
@@ -92,9 +101,6 @@ def _main(a, pr):
         pr.stage("map", 0, "뼈대 넣는 중 (내 PC에서 자동 리깅)")
         model, bones, _, _ = autorig(model, log=pr.log)
         mapping = Mapping(bones, np.array([0.0, 0.0, 1.0]), [])
-    else:
-        pr.stage("map", 0, "뼈대 분석 중 (머리·팔·다리 찾기)")
-        mapping = find_humanoid(model)
     for w in mapping.warnings:
         pr.log("주의: " + w)
 

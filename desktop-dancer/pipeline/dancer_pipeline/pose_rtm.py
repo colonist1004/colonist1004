@@ -63,11 +63,12 @@ def _bbox_from_kpts(k2, sc, w, h):
 def estimate(frames, fps, person=None, log=print, on_frame=None, models=None, det_every=8):
     """Same contract as pose_mediapipe.estimate: (world kp, image kp (+Y up, px), valid)."""
     det, pose = models or load_models(pick_device(log), log)
-    k2s, zs, scs, valid = [], [], [], []
+    k2s, zs, scs, valid, sizes = [], [], [], [], []
     prev_box, prev_center = None, None
     for i, (t, rgb) in enumerate(frames):
         img = np.ascontiguousarray(rgb[:, :, ::-1])  # rtmlib expects BGR like OpenCV
         h, w = img.shape[:2]
+        sizes.append((w, h))
         box = None
         if prev_box is None or i % det_every == 0:
             boxes = det(img)
@@ -102,7 +103,19 @@ def estimate(frames, fps, person=None, log=print, on_frame=None, models=None, de
             prev_center = k2[[11, 12]].mean(0) if ok else prev_center
         if on_frame and i % 5 == 0:
             on_frame(i)
-    return to_keypoints(np.array(k2s), np.array(zs), np.array(valid))
+    k2s, scs = np.array(k2s), np.array(scs)
+    return (*to_keypoints(k2s, np.array(zs), np.array(valid)), legs_in_view(k2s, scs, np.array(sizes, float)))
+
+
+def legs_in_view(k2, sc, sizes, min_score=0.3):
+    """side -> (F, 2) bool: knee and ankle detected with confidence and inside the picture."""
+    out = {}
+    for side, ks in (("left", (13, 15)), ("right", (14, 16))):
+        p = k2[:, ks]  # (F, 2, 2) px
+        inside = (p[..., 0] > -0.02 * sizes[:, None, 0]) & (p[..., 0] < 1.02 * sizes[:, None, 0]) \
+            & (p[..., 1] > -0.02 * sizes[:, None, 1]) & (p[..., 1] < sizes[:, None, 1])
+        out[side] = inside & (sc[:, ks] > min_score)
+    return out
 
 
 BONES_WB = [(5, 7), (7, 9), (6, 8), (8, 10), (11, 13), (13, 15), (12, 14), (14, 16), (5, 11), (6, 12), (5, 6), (11, 12)]

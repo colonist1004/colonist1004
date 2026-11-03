@@ -29,6 +29,9 @@ This folder is separate from the photo editor at the repo root and has its own `
 - `char/humanoid.py` finds VRM bones from geometry. `normalize.py` handles facing +Z, T-pose, scale, and world-aligned joints.
 - `char/gltf_write.py` writes VRM 1.0 with MToon. It writes VRM directly, without Blender or UniVRM.
 - `char/autorig.py` rigs unrigged meshes on the CPU. It renders views with `char/render.py`, picks the front where MediaPipe finds a person, lifts the 2D joints to 3D with mesh depth, and computes heat-diffusion weights with arm gating. Without MediaPipe it falls back to the geometric `fit_skeleton`.
+- Partial bodies (the photo ends at the shins or the waist, or a hand is missing): `best_view` runs a second sweep zoomed onto the body's own axis, so props and missing legs do not fool the front view. A shoulder/hip line fix then turns out the remaining yaw. `fit_to_mesh` pulls the joint chains back inside the front silhouette and returns `loose` bones. Those get no skin weight; their mesh goes to the nearest ancestor that is kept. Arm radii are capped by shoulder width. Test it with `tests/make_char_fixture.py --unrigged --cut-below 0.3|0.55 [--cut-hand --arm-down 0]`.
+- A rigged GLB whose skeleton `find_humanoid` rejects falls back to the auto-rig.
+- Dance extraction: knees and ankles that are not seen confidently inside the frame (each engine returns `legs`) ease into a standing pose (`post.legs_seen` and `post.stand_unseen_legs`). Dips shorter than 0.3 s are ignored.
 - Slider tweaks live in `src/renderer/customize.js`. They are stored per character as `library/characters/<name>.custom.json` and applied at load in both the dancer and the preview. They never modify the VRM.
 - Preview any model with `node scripts/preview/preview.mjs model.vrm out.png [--motion m.vrma --t 1.5] [--skeleton]`. Set `NODE_PATH` to the global node_modules for playwright.
 

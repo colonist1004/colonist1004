@@ -62,6 +62,31 @@ def _core_only(m, idx, truth_names, no_neck):
     return out
 
 
+def _cut(m, below, lower_arm, hand):
+    """Drop triangles below `below` * height, and (if `hand` is set) past the middle of the forearm."""
+    allp = np.concatenate([p.positions for p in m.prims])
+    y0 = allp[:, 1].min() + below * np.ptp(allp[:, 1])
+    if hand is not None:
+        a, b = joint_pos(m, lower_arm), joint_pos(m, hand)
+        mid, u, fl = (a + b) / 2, (b - a) / np.linalg.norm(b - a), np.linalg.norm(b - a)
+    prims = []
+    for p in m.prims:
+        keep = p.positions[:, 1] >= y0
+        if hand is not None:
+            far = np.linalg.norm(p.positions - b, axis=1) > 0.8 * fl  # only around the hand (use --arm-down 0)
+            keep &= ((p.positions - mid) @ u < 0) | far
+        t = p.indices.reshape(-1, 3)
+        t = t[keep[t].all(1)]
+        if not len(t):
+            continue
+        used, t = np.unique(t, return_inverse=True)  # drop the vertices nothing uses any more
+        pick = lambda arr: None if arr is None else arr[used]  # noqa: E731
+        prims.append(type(p)(p.positions[used], pick(p.normals), pick(p.uvs), pick(p.joints), pick(p.weights),
+                             t.reshape(-1).astype(p.indices.dtype), p.material))
+    m.prims = prims
+    return m
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("vrm")
@@ -72,6 +97,10 @@ def main():
                     help="keep only main body bones (like a simple auto-rig); others' weights go to the kept ancestor")
     ap.add_argument("--no-neck", action="store_true", help="also drop neck/upperChest/shoulders/toes")
     ap.add_argument("--unrigged", action="store_true", help="write only the mesh (like TRELLIS output), plus truth joint positions")
+    ap.add_argument("--cut-below", type=float, default=0,
+                    help="drop the mesh below this share of the height (0.3 = cut at the shins, 0.55 = no legs), "
+                         "like a character made from a photo that does not show the whole body")
+    ap.add_argument("--cut-hand", action="store_true", help="also drop the character's left hand and wrist")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -106,6 +135,9 @@ def main():
     M[:3, :3] = yaw_matrix(np.radians(a.yaw)) * s
     M[:3, 3] = -(yaw_matrix(np.radians(a.yaw)) * s) @ c
     m = transform(m, M)
+
+    if a.cut_below > 0 or a.cut_hand:
+        m = _cut(m, a.cut_below, idx[truth_names["leftLowerArm"]], idx[truth_names["leftHand"]] if a.cut_hand else None)
 
     # Anonymous bone names, like UniRig's output.
     old = list(m.joint_names)

@@ -103,6 +103,44 @@ def test_facing_away_keeps_toes_forward():
         assert toe_minus_heel < 0, f"facing away, sign {sign}: toes should point away from the camera"
 
 
+def test_legs_out_of_the_picture_stand_still():
+    """A dancer filmed from the waist up: the detector guesses the legs and they flail. Legs that are
+    not in the picture (or not confident) stand straight under the hips instead, easing in and out."""
+    from dancer_pipeline.pose_rtm import legs_in_view
+    from dancer_pipeline.rot import axis_angle_to_matrix
+
+    n, w, h = 60, 640, 480
+    k2 = np.zeros((n, 133, 2)) + [320, 200]
+    sc = np.ones((n, 133))
+    k2[20:40, [13, 15], 1] = 520  # left knee/ankle below the picture
+    sc[44:56, 14] = 0.1  # right knee unsure for 0.4 s
+    sc[5:8, 16] = 0.1  # right ankle blurred for 0.1 s: too short to count
+    seen_pts = legs_in_view(k2, sc, np.tile([w, h], (n, 1)).astype(float))
+    seen = post.legs_seen(seen_pts, np.ones(n, bool))
+    assert not seen["left"][20:40].any() and seen["left"][:20].all() and seen["left"][40:].all()
+    assert not seen["right"][44:56].any() and seen["right"][:44].all()
+
+    rng = np.random.default_rng(1)
+    rand = lambda: axis_angle_to_matrix(rng.normal(0, 0.6, (n, 3)))  # noqa: E731
+    yaw = np.stack([yaw_matrix(a) for a in np.linspace(0, 1.5, n)])
+    local = {"hips": yaw @ axis_angle_to_matrix(np.tile([0.2, 0, 0], (n, 1)))}
+    for s in ("left", "right"):
+        for b in ("UpperLeg", "LowerLeg", "Foot"):
+            local[s + b] = rand()
+    out, replaced = post.stand_unseen_legs(local, seen, fps=30)
+    assert abs(replaced["left"] - 20 / 60) < 1e-9
+    up = local["hips"] @ out["leftUpperLeg"]  # thigh in world space
+    for i in range(20, 40):
+        assert np.allclose(up[i] @ [0, -1, 0], [0, -1, 0], atol=1e-6), "thigh straight down"
+        assert np.allclose(up[i] @ [0, 0, 1], yaw[i] @ [0, 0, 1], atol=1e-6), "knee faces where the hips face"
+        assert np.allclose(out["leftLowerLeg"][i], np.eye(3), atol=1e-6)
+    assert np.allclose(out["leftUpperLeg"][:5], local["leftUpperLeg"][:5])  # seen legs keep their motion
+    assert np.allclose(out["rightFoot"][:30], local["rightFoot"][:30])
+    # eases in: the frame right before the gap is already partly standing, but not fully
+    d = lambda a, b: np.linalg.norm(a - b)  # noqa: E731
+    assert 0 < d(out["leftLowerLeg"][18], local["leftLowerLeg"][18]) < d(np.eye(3), local["leftLowerLeg"][18])
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

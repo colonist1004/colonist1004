@@ -227,23 +227,60 @@ def _detector(log):
     return detect
 
 
-def best_view(P, C, detect, log=lambda *_: None, step_deg=15, size=512):
-    """Render around the model; the front is the view where a person is detected facing the camera
-    with the widest shoulders. Returns (yaw, landmarks (33,3: x,y px + visibility), view info) or None."""
+def _sweep(P, C, detect, yaws, size, frame=None):
     from .render import render
 
-    best = None
-    for deg in range(0, 360, step_deg):
-        img, _, depth, view = render(P, C, np.radians(deg), size=size)
+    out = []
+    for yaw in yaws:
+        img, _, depth, view = render(P, C, yaw, size=size, frame=frame)
         r = detect(img)
-        if not r.pose_landmarks:
-            continue
-        L = np.array([[l.x * size, l.y * size, l.visibility] for l in r.pose_landmarks[0]])
+        if r.pose_landmarks:
+            L = np.array([[l.x * size, l.y * size, l.visibility] for l in r.pose_landmarks[0]])
+            out.append((yaw, L, view, depth))
+    return out
+
+
+def _body_axis(found, size):
+    """Vertical line (x, z) through the torso, triangulated from the shoulder/hip centers seen in
+    several views: lateral = x cos(yaw) - z sin(yaw)."""
+    A, b = [], []
+    for yaw, L, (origin, span, right, fwd), _ in found:
+        u = (L[11, 0] + L[12, 0] + L[23, 0] + L[24, 0]) / 4
+        A.append([np.cos(yaw), -np.sin(yaw)])
+        b.append(origin[0] + u / (size - 1) * span)
+    if len(A) < 2:
+        return None
+    sol, *_ = np.linalg.lstsq(np.array(A), np.array(b), rcond=None)
+    return sol
+
+
+def best_view(P, C, detect, log=lambda *_: None, step_deg=15, size=512):
+    """Render around the model; the front is the view where a person is detected facing the camera
+    with the widest shoulders. Returns (yaw, landmarks (33,3: x,y px + visibility), view info) or None.
+
+    Two passes: the first fits the whole model in each view. Big props (wings, weapons) can make the
+    person small there, and a model without legs leaves the detector guessing, so the second pass
+    zooms every view onto the person's own vertical axis (found from the first pass) with the same
+    framing, which keeps the shoulder widths comparable between views."""
+    yaws = [np.radians(d) for d in range(0, 360, step_deg)]
+    found = _sweep(P, C, detect, yaws, size)
+    axis = _body_axis(found, size)
+    if axis is not None:
+        H = np.ptp(P[:, 1])
+        d = np.hypot(P[:, 0] - axis[0], P[:, 2] - axis[1])
+        reach = np.percentile(d, 90)  # arms and nearby clothes; a long prop sticks out past this
+        span = max(H, 2.2 * reach) * 1.08
+        frame = (axis, P[:, 1].min() - 0.04 * span, span)
+        zoomed = _sweep(P, C, detect, yaws, size, frame)
+        if zoomed:
+            found = zoomed
+    best = None
+    for yaw, L, view, depth in found:
         facing = L[11, 0] > L[12, 0] and L[0, 2] > 0.5  # person's left shoulder on the image right, face seen
-        width = abs(L[11, 0] - L[12, 0]) / size
-        score = width + (1.0 if facing else 0.0)
+        width = (L[11, 0] - L[12, 0]) / (size - 1) * view[1]  # world units (views can be framed differently)
+        score = width / np.ptp(P[:, 1]) + (1.0 if facing else 0.0)
         if best is None or score > best[0]:
-            best = (score, np.radians(deg), L, view, depth)
+            best = (score, yaw, L, view, depth)
     if best is None or best[0] < 1.0:
         return None
     log(f"정면 방향 찾음 ({np.degrees(best[1]):.0f}°)")
@@ -307,9 +344,96 @@ def joints_from_landmarks(P, L, view, H):
     return J
 
 
-def _add_toes(V, J, H):
+def _near_mesh(S, pts, r):
+    """For each point: is it on the model's front silhouette (mesh within r in x and y)? Joints sit
+    inside the body, often far from the surface, so depth is ignored."""
+    out = np.zeros(len(pts), bool)
+    for i, p in enumerate(pts):
+        out[i] = ((np.abs(S[:, 0] - p[0]) < r) & (np.abs(S[:, 1] - p[1]) < r)).any()
+    return out
+
+
+def _fit_chain(S, J, names, r, steps=40):
+    """Pull a limb chain (joint names from the body outward) back inside the mesh when the photo did not
+    show all of it: the pose detector still guesses knees/ankles/hands outside the model then.
+    Joints keep their share of the limb along the part that exists. Returns the share that exists (0..1)."""
+    pts = [J[n] for n in names]
+    seg = [np.linalg.norm(b - a) for a, b in zip(pts, pts[1:])]
+    total = sum(seg)
+    if total < 1e-9:
+        return 1.0
+    cum = np.concatenate([[0.0], np.cumsum(seg)])
+
+    def at(d):
+        k = min(np.searchsorted(cum, d, side="right") - 1, len(seg) - 1)
+        t = (d - cum[k]) / max(seg[k], 1e-12)
+        return pts[k] + np.clip(t, 0, 1) * (pts[k + 1] - pts[k])
+
+    ds = np.linspace(0, total, steps + 1)
+    ok = _near_mesh(S, np.array([at(d) for d in ds]), r)
+    # the root joint sits in the body; the first real gap (two samples in a row) ends the limb
+    gap = np.flatnonzero(~ok[1:-1] & ~ok[2:])
+    if not len(gap) and ok[-1]:
+        return 1.0
+    reach = ds[gap[0]] if len(gap) else ds[-2]  # last sample with mesh
+    share = reach / total
+    if share > 0.97:
+        return 1.0
+    for n, c in zip(names[1:], cum[1:]):
+        J[n] = at(c * share)
+    return share
+
+
+def fit_to_mesh(S, J, H, log=lambda *_: None):
+    """Make the joints agree with a model that does not have the whole body (legs cut off at the knees or
+    the waist, a missing hand...). Returns the bones that should not move any of the mesh."""
+    # Sizes from the shoulders: H is only the part of the body the model has.
+    sw = np.linalg.norm(J["leftUpperArm"] - J["rightUpperArm"])
+    r = 0.1 * sw
+    loose = set()
+    # A bust: the hips the detector guessed are below the model. Move the hips up into the body.
+    if not _near_mesh(S, J["hips"][None], r)[0]:
+        top = (J["leftUpperArm"] + J["rightUpperArm"]) / 2
+        for t in np.linspace(0, 0.8, 41):
+            p = J["hips"] + t * (top - J["hips"])
+            if _near_mesh(S, p[None], r)[0]:
+                break
+        J["hips"] = p
+        for name, t in (("spine", 0.25), ("chest", 0.55), ("upperChest", 0.8)):
+            J[name] = p + t * (top - p)
+        for s in ("left", "right"):
+            J[f"{s}UpperLeg"] = J[f"{s}UpperLeg"] + (p - J[f"{s}UpperLeg"]) * np.array([0, 1, 1])
+        log("허리 아래가 없는 모델: 엉덩이 뼈를 몸 안으로 옮겼습니다")
+    for s, side in (("left", "왼"), ("right", "오른")):
+        leg = [f"{s}UpperLeg", f"{s}LowerLeg", f"{s}Foot"]
+        share = _fit_chain(S, J, leg, r)
+        if share < 0.3:  # (almost) no leg: the leg bones stay, but the hips carry that part of the mesh
+            loose |= set(leg) | {f"{s}Toes"}
+            J[f"{s}LowerLeg"] = J[f"{s}UpperLeg"] - np.array([0, 0.2 * sw, 0])
+            J[f"{s}Foot"] = J[f"{s}UpperLeg"] - np.array([0, 0.4 * sw, 0])
+            log(f"{side}쪽 다리가 없습니다: 다리 뼈는 움직여도 몸을 끌지 않게 합니다")
+        elif share < 1:
+            loose |= {f"{s}Foot", f"{s}Toes"}
+            log(f"{side}쪽 다리가 잘려 있습니다 ({share:.0%}): 무릎·발목을 모델 안으로 맞췄습니다")
+        arm = [f"{s}UpperArm", f"{s}LowerArm", f"{s}Hand", f"{s}HandTip"]
+        share = _fit_chain(S, J, arm, r)
+        if share < 1:
+            if share < 0.35:
+                loose |= {f"{s}LowerArm", f"{s}Hand"}
+            elif share < 0.75:
+                loose |= {f"{s}Hand"}
+            log(f"{side}쪽 팔이 잘려 있습니다 ({share:.0%}): 팔 관절을 모델 안으로 맞췄습니다")
+    return loose
+
+
+def _add_toes(V, J, H, loose=()):
     floor = V[:, 1].min()
     for s in ("left", "right"):
+        if f"{s}Foot" in loose:  # no foot in the model: small toes in front of the ankle, moving nothing
+            a = J[f"{s}Foot"]
+            J[f"{s}Toes"] = a + np.array([0, -0.02 * H, 0.04 * H])
+            J[f"{s}ToeTip"] = a + np.array([0, -0.02 * H, 0.07 * H])
+            continue
         ankle = J[f"{s}Foot"]
         ankle[1] = max(ankle[1], floor + 0.035 * H)
         foot = V[(V[:, 1] < floor + 0.05 * H) & (np.linalg.norm(V[:, [0, 2]] - ankle[[0, 2]], axis=1) < 0.1 * H)]
@@ -343,19 +467,28 @@ def _seg_dist(P, a, b):
     return np.linalg.norm(P - (a + np.outer(t, ab)), axis=1)
 
 
-def skin_weights(V, F, J, iters=200, log=lambda *_: None):
-    """Heat-diffusion style weights (Pinocchio-like) on a welded vertex graph. Returns (W (V,4), I (V,4))."""
+def skin_weights(V, F, J, iters=200, log=lambda *_: None, loose=()):
+    """Heat-diffusion style weights (Pinocchio-like) on a welded vertex graph. Returns (W (V,4), I (V,4)).
+    `loose` bones get no weight (limbs the model does not have)."""
     names = [n for n, _ in BONE_ORDER]
     segs = _bone_segments(J)
     D = np.stack([_seg_dist(V, *segs[n]) for n in names], axis=1)  # (V,B)
     # limb thickness: median distance of the vertices closest to each bone
     raw_near = D.argmin(1)
-    H = np.ptp(V[:, 1])
+    # Body size for the limb radii: the model height, or (for a model without legs) what the shoulders
+    # say a whole body would measure.
+    sw = np.linalg.norm(J["leftUpperArm"] - J["rightUpperArm"])
+    H = max(np.ptp(V[:, 1]), 5.2 * sw)
     # Robust thickness: a low percentile of the closest vertices (props hanging near a limb would inflate a
     # median), clamped to human-like limb radii.
     radius = np.array([np.percentile(D[raw_near == b, b], 30) if (raw_near == b).sum() > 10 else 0.03 * H
                        for b in range(len(names))])
     radius = np.clip(radius, 0.015 * H, 0.08 * H)
+    # Arms are thin. Arms hanging against a loose shirt would otherwise measure the shirt and take it
+    # along when they are lifted into the T-pose.
+    for k, nm in enumerate(names):
+        if any(t in nm for t in ("UpperArm", "LowerArm", "Hand")):
+            radius[k] = min(radius[k], 0.2 * sw)
     Dn = D / radius
     # Arms may only claim vertices close to their own axis or outside the shoulders. Loose clothing at the
     # armpit, long hair and props hanging next to the arms belong to the torso/head instead.
@@ -367,7 +500,15 @@ def skin_weights(V, F, J, iters=200, log=lambda *_: None):
             ok = (D[:, k] < 1.6 * radius[k]) | outside
             Dn[~ok, k] *= 4.0
     near = Dn.argmin(1)
-    dmin = D[np.arange(len(V)), near]
+    dmin = D[np.arange(len(V)), near]  # (anchor strength: as close as the bone it would have had)
+    if loose:  # the mesh a missing limb would have taken stays with the nearest bone that is there
+        parent = dict(BONE_ORDER)
+        keep = []
+        for nm in names:
+            while nm in loose:
+                nm = parent[nm]
+            keep.append(names.index(nm))
+        near = np.array(keep)[near]
     # welded graph (UV seams split vertices; merge by position so heat crosses seams)
     key = np.round(V / (np.ptp(V, axis=0).max() * 1e-5)).astype(np.int64)
     _, weld, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
@@ -425,9 +566,21 @@ def autorig(model: Model, log=lambda *_: None):
         right, fwd = view[2], view[3]
         R = np.stack([right, [0.0, 1.0, 0.0], fwd])  # front view's right = character's left
         J = {k: v for k, v in J.items()}  # already in (right, up, toward-camera) coordinates
+        # The views are 15° apart: turn the last bit so the shoulder and hip lines (3D, with depth from
+        # the mesh) run straight left-right.
+        lat = sum(J[f"left{b}"] - J[f"right{b}"] for b in ("UpperArm", "UpperLeg"))
+        ang = np.arctan2(lat[2], lat[0])
+        if abs(ang) < np.radians(20):
+            c, s_ = np.cos(ang), np.sin(ang)
+            Ry = np.array([[c, 0, s_], [0, 1, 0], [-s_, 0, c]])  # maps lat onto +x
+            J = {k: Ry @ v for k, v in J.items()}
+            R = Ry @ R
+            log(f"방향 보정 {np.degrees(ang):+.1f}°")
         Vc = V @ R.T
         shift = np.zeros(3)
-        _add_toes(Vc, J, H)
+        Sc = P[np.random.default_rng(0).choice(len(P), min(len(P), 60000), replace=False)] @ R.T
+        loose = fit_to_mesh(Sc, J, H, log)
+        _add_toes(Vc, J, H, loose)
     else:
         log("자세 인식 실패: 몸 모양으로 뼈대를 추정합니다")
         offs0 = np.cumsum([0] + [len(p.positions) for p in model.prims])
@@ -440,13 +593,14 @@ def autorig(model: Model, log=lambda *_: None):
         shift = np.array([np.median(legs[:, 0]), 0.0, np.median(legs[:, 2])])
         Vc = V @ R.T - shift
         J = fit_skeleton(Sc - shift)
+        loose = set()
     names = [n for n, _ in BONE_ORDER]
     parent = {n: p for n, p in BONE_ORDER}
     # faces with global vertex indices
     offs = np.cumsum([0] + [len(p.positions) for p in model.prims])
     F = np.concatenate([p.indices.reshape(-1, 3) + offs[i] for i, p in enumerate(model.prims)])
     log("스키닝 웨이트 계산 중")
-    W, I = skin_weights(Vc, F, J, log=log)
+    W, I = skin_weights(Vc, F, J, log=log, loose=loose)
     world = np.stack([np.eye(4) for _ in names])
     for k, nm in enumerate(names):
         world[k][:3, 3] = J[nm]
