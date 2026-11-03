@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Desktop Dancer</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Dancer</h1>
+      <p class="sub">캐릭터가 화면 위에서, 또는 배경화면에서 춤을 춥니다.</p>
+    </header>
+
+    <div class="preview"><iframe id="preview" src="dancer.html?mode=preview" title="미리보기"></iframe></div>
+
+    <section class="card">
+      <h2>캐릭터</h2>
+      <select id="character"></select>
+      <div class="row"><button data-add="characters">VRM 파일 추가</button></div>
+      <h2 class="mt">춤</h2>
+      <select id="motion"></select>
+      <div class="row"><button data-add="motions">VRMA 파일 추가</button></div>
+      <p class="hint">
+        PC 앱에서 만든 캐릭터·춤은 PC의 <b>%APPDATA%\desktop-dancer\library</b> 폴더에 있습니다. 그 안의 .vrm / .vrma
+        파일(다듬기 값은 같은 이름의 .custom.json)을 휴대폰으로 옮긴 뒤 위 버튼으로 추가하세요.
+      </p>
+      <div class="field">
+        <label for="speed">춤 속도</label>
+        <input id="speed" type="range" min="0.5" max="1.5" step="0.05" /><span id="speed-v"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>화면 위에 띄우기</h2>
+      <p class="hint">다른 앱을 쓰는 동안에도 캐릭터가 화면 위에 떠서 춤춥니다. 손가락으로 끌어 옮기고, 길게 누르면 이 설정 화면이 열립니다.</p>
+      <div id="perm-box" class="warn" hidden>
+        <span>‘다른 앱 위에 표시’ 권한이 필요합니다.</span>
+        <button id="btn-perm" class="primary">권한 켜기</button>
+      </div>
+      <div class="row">
+        <button id="btn-overlay" class="primary big">띄우기</button>
+      </div>
+      <div class="field">
+        <label for="scale">크기</label>
+        <input id="scale" type="range" min="25" max="800" step="5" /><span id="scale-v"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>라이브 배경화면</h2>
+      <p class="hint">홈 화면 배경에서 캐릭터가 춤춥니다. 배경화면이 보이지 않을 때는 멈춰서 배터리를 아낍니다.</p>
+      <div class="field">
+        <label for="bg">배경색</label>
+        <input id="bg" type="color" />
+      </div>
+      <div class="field">
+        <label for="wpScale">크기</label>
+        <input id="wpScale" type="range" min="10" max="150" step="1" /><span id="wpScale-v"></span>
+      </div>
+      <div class="field">
+        <label for="wpX">좌우 위치</label>
+        <input id="wpX" type="range" min="0" max="100" step="1" /><span id="wpX-v"></span>
+      </div>
+      <div class="field">
+        <label for="wpY">높이</label>
+        <input id="wpY" type="range" min="0" max="80" step="1" /><span id="wpY-v"></span>
+      </div>
+      <div class="wp-preview"><iframe id="wp-preview" src="dancer.html?mode=wallpaper" title="배경화면 미리보기"></iframe></div>
+      <div class="row"><button id="btn-wallpaper" class="primary big">배경화면으로 설정</button></div>
+    </section>
+
+    <script src="settings.js"></script>
+  </body>
+</html>

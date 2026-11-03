@@ -1,0 +1,46 @@
+name: Build Dancer Android APK
+
+on:
+  push:
+    branches: ["**"]
+    paths: ["desktop-dancer/mobile/**", "desktop-dancer/src/renderer/**", "desktop-dancer/assets/**",
+            "desktop-dancer/package*.json", ".github/workflows/desktop-dancer-android.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop-dancer/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Renderer libraries (three.js, three-vrm) for the APK assets
+        working-directory: desktop-dancer
+        run: |
+          npm ci
+          node scripts/vendor.mjs
+
+      # ubuntu-latest runners ship with the Android SDK preinstalled (ANDROID_HOME)
+      - name: Build debug APK
+        working-directory: desktop-dancer/mobile
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dancer-android-apk
+          path: desktop-dancer/mobile/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

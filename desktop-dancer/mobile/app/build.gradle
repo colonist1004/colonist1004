@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.desktopdancer.mobile'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.desktopdancer.mobile'
+        minSdk 26          // TYPE_APPLICATION_OVERLAY
+        targetSdk 34
+        versionCode 1
+        versionName '0.1'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    sourceSets {
+        main {
+            assets.srcDirs += ["$buildDir/generated/dancerAssets"]
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.9.0'   // WebViewAssetLoader
+}
+
+// The web side (three.js + three-vrm renderer shared with the PC app) is copied into the APK assets:
+//   mobile/web/*                       -> assets/web/
+//   src/renderer/vendor (npm run prestart / scripts/vendor.mjs) -> assets/web/vendor/
+//   src/renderer/customize.js          -> assets/web/customize.js
+//   assets/characters|motions samples  -> assets/web/samples/
+def dd = rootProject.projectDir.parentFile  // desktop-dancer/
+def copyDancerWeb = tasks.register('copyDancerWeb', Copy) {
+    doFirst {
+        if (!new File(dd, 'src/renderer/vendor/three.module.js').exists()) {
+            throw new GradleException("src/renderer/vendor is missing: run `npm ci && node scripts/vendor.mjs` in desktop-dancer first")
+        }
+    }
+    into "$buildDir/generated/dancerAssets/web"
+    from(new File(rootProject.projectDir, 'web'))
+    from(new File(dd, 'src/renderer/customize.js'))
+    from(new File(dd, 'src/renderer/vendor')) { into 'vendor' }
+    from(new File(dd, 'assets/characters/mannequin.vrm')) { into 'samples' }
+    from(new File(dd, 'assets/motions/sample-dance.vrma')) { into 'samples' }
+}
+preBuild.dependsOn copyDancerWeb
