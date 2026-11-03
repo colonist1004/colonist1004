@@ -71,12 +71,17 @@ function resize() {
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(w, h, false);
   const pad = viewHeight * 0.01; // keep the soles visible right at the bottom edge
-  const frameH = frame?.nominalHeight || h;
-  const unitsPerPx = viewHeight / frameH;
-  camera.left = (-w * unitsPerPx) / 2;
-  camera.right = (w * unitsPerPx) / 2;
-  camera.bottom = -pad;
-  camera.top = -pad + h * unitsPerPx;
+  // Full frame in world units: feet at y = -pad (bottom), centered on x = 0. The window shows the
+  // slice starting at (cropLeft, cropTop) of that frame.
+  const fw = frame?.nominalWidth || w;
+  const fh = frame?.nominalHeight || h;
+  const upp = viewHeight / fh; // world units per pixel
+  const left = (-fw / 2 + (frame?.cropLeft || 0)) * upp;
+  const top = -pad + (fh - (frame?.cropTop || 0)) * upp;
+  camera.left = left;
+  camera.right = left + w * upp;
+  camera.top = top;
+  camera.bottom = top - h * upp;
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);

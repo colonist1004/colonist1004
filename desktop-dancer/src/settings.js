@@ -6,7 +6,8 @@ const path = require('node:path');
 const DEFAULTS = {
   visible: true,
   scale: 1,
-  xFraction: 1, // 0 = left edge of the screen, 1 = right edge (next to the tray clock)
+  xFraction: 1, // legacy (before xCenter): 0 = left edge, 1 = right edge
+  xCenter: null, // character center as a share of the work area width (null = use xFraction)
   yOffset: 0, // px the feet stand above the taskbar (negative: sink behind it)
   displayId: null, // null = primary display
   character: null, // absolute path; null = first in library

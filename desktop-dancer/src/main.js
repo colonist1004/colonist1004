@@ -77,44 +77,62 @@ function computeBounds() {
   return placement.computeBounds(targetDisplay(), settings.get());
 }
 
+function frameInfo(b) {
+  return { nominalWidth: b.nominalWidth, nominalHeight: b.nominalHeight, cropLeft: b.cropLeft, cropTop: b.cropTop };
+}
+
 function placeWindow() {
   if (!win) return;
   const b = computeBounds();
   win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
-  // The renderer frames the character by its true size (it may be bigger than the window).
-  win.webContents.send('frame', { nominalWidth: b.nominalWidth, nominalHeight: b.nominalHeight, cropTop: b.cropTop });
+  // The renderer draws the slice of the character's frame that this window shows.
+  win.webContents.send('frame', frameInfo(b));
   placeWin?.webContents.send('place:changed', placementState());
 }
 
 function placementState() {
   const s = settings.get();
   const d = targetDisplay();
+  const scale = placement.clampScale(s.scale);
   const b = computeBounds();
+  const xr = placement.xRange(d, scale);
   return {
-    scale: placement.clampScale(s.scale),
-    xFraction: s.xFraction,
-    yOffset: s.yOffset || 0,
-    yRange: placement.yOffsetRange(d),
-    freeWidth: Math.max(0, d.workArea.width - b.width),
+    scale,
+    xCenterPx: Math.round(Math.min(xr.max, Math.max(xr.min, placement.centerPx(d, { ...s, scale })))),
+    xRange: xr,
+    yOffset: Math.round(Math.min(placement.yOffsetRange(d, scale).max, Math.max(placement.yOffsetRange(d, scale).min, s.yOffset || 0))),
+    yRange: placement.yOffsetRange(d, scale),
+    frameHeight: b.nominalHeight,
+    workWidth: d.workArea.width,
     minScale: placement.MIN_SCALE,
     maxScale: placement.MAX_SCALE,
-    cropped: b.cropTop > 0 || b.width < b.nominalWidth,
+    cropped: b.cropped,
   };
 }
 
-/** Partial update from the placement window / mouse wheel, validated. */
+/** Partial update from the placement window / mouse wheel / tray, validated. */
 function updatePlacement(patch) {
+  const d = targetDisplay();
+  const cur = settings.get();
   const next = {};
-  if (Number.isFinite(patch.scale)) next.scale = placement.clampScale(patch.scale);
-  if (Number.isFinite(patch.xFraction)) next.xFraction = Math.min(1, Math.max(0, patch.xFraction));
-  if (Number.isFinite(patch.yOffset)) {
-    const r = placement.yOffsetRange(targetDisplay());
-    next.yOffset = Math.round(Math.min(r.max, Math.max(r.min, patch.yOffset)));
-  }
+  // keep the current center when only the size changes (also converts the old xFraction setting)
+  const centerNow = placement.centerPx(d, { ...cur, scale: placement.clampScale(cur.scale) });
+  next.scale = Number.isFinite(patch.scale) ? placement.clampScale(patch.scale) : placement.clampScale(cur.scale);
+  const cx = Number.isFinite(patch.xCenterPx) ? patch.xCenterPx : centerNow;
+  next.xCenter = placement.xCenterFor(d, d.workArea.x + cx, next.scale);
+  const yr = placement.yOffsetRange(d, next.scale);
+  const y = Number.isFinite(patch.yOffset) ? patch.yOffset : cur.yOffset || 0;
+  next.yOffset = Math.round(Math.min(yr.max, Math.max(yr.min, y)));
   settings.update(next);
   placeWindow();
   rebuildTrayMenu();
   return placementState();
+}
+
+function resetPlacement() {
+  const d = targetDisplay();
+  settings.update({ displayId: null });
+  return updatePlacement({ scale: 1, xCenterPx: d.workArea.width - placement.BASE_WIDTH / 2, yOffset: 0 });
 }
 
 function createWindow() {
@@ -298,7 +316,7 @@ function rebuildTrayMenu() {
     {
       label: `크기 (${Math.round(placement.clampScale(s.scale) * 100)}%)`,
       submenu: [
-        ...[0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8].map((v) => ({
+        ...[0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16].map((v) => ({
           label: `${Math.round(v * 100)}%`,
           type: 'radio',
           checked: Math.abs(s.scale - v) < 1e-3,
@@ -360,8 +378,7 @@ function rebuildTrayMenu() {
     {
       label: '위치 초기화',
       click: () => {
-        settings.update({ xFraction: 1, yOffset: 0, displayId: null });
-        placeWindow();
+        resetPlacement();
         rebuildTrayMenu();
       },
     },
@@ -455,19 +472,17 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
   if (!win) return;
   const d = targetDisplay();
   if (phase === 'start') {
-    const b = win.getBounds();
-    dragStart = { mouseX: screenX, mouseY: screenY, winX: b.x, bottom: b.y + b.height };
+    dragStart = { mouseX: screenX, mouseY: screenY, ...placement.frameAnchor(d, settings.get()) };
   } else if (phase === 'move' && dragStart) {
-    const cur = computeBounds();
-    const x = placement.clampX(d, dragStart.winX + (screenX - dragStart.mouseX), cur.width);
-    const yOffset = placement.yOffsetFor(d, dragStart.bottom + (screenY - dragStart.mouseY));
-    settings.update({ yOffset });
+    const scale = placement.clampScale(settings.get().scale);
+    settings.update({
+      xCenter: placement.xCenterFor(d, dragStart.centerX + (screenX - dragStart.mouseX), scale),
+      yOffset: placement.yOffsetFor(d, dragStart.bottom + (screenY - dragStart.mouseY), scale),
+    });
     const b = computeBounds();
-    win.setBounds({ x, y: b.y, width: b.width, height: b.height });
-    win.webContents.send('frame', { nominalWidth: b.nominalWidth, nominalHeight: b.nominalHeight, cropTop: b.cropTop });
+    win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+    win.webContents.send('frame', frameInfo(b));
   } else if (phase === 'end' && dragStart) {
-    const { x, width } = win.getBounds();
-    settings.update({ xFraction: placement.xFractionFor(d, x, width) });
     dragStart = null;
     placeWin?.webContents.send('place:changed', placementState());
   }
@@ -511,7 +526,7 @@ function openPlaceWindow() {
 
 ipcMain.handle('place:get', () => placementState());
 ipcMain.handle('place:set', (_e, patch) => updatePlacement(patch && typeof patch === 'object' ? patch : {}));
-ipcMain.handle('place:reset', () => updatePlacement({ scale: 1, xFraction: 1, yOffset: 0 }));
+ipcMain.handle('place:reset', () => resetPlacement());
 
 ipcMain.on('renderer-error', (_e, msg) => {
   console.error('[renderer]', msg);
