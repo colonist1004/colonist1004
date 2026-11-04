@@ -58,9 +58,10 @@ def _mat_to_trs(M):
 
 
 def write_glb(model: Model, path, *, name="model", vrm: dict | None = None, mtoon: dict | None = None,
-              skinned: bool = True):
+              skinned: bool = True, spring: dict | None = None):
     """vrm: {"humanBones": {vrmBone: jointIndex}, "meta": {...}} to write a VRM 1.0 file.
-    mtoon: MToon parameters applied to every material (only with vrm)."""
+    mtoon: MToon parameters applied to every material (only with vrm).
+    spring: a VRMC_springBone extension (node indices = joint indices), only with vrm."""
     b = _Bin()
     j = b.json
     j.update({"asset": {"version": "2.0", "generator": "desktop-dancer character pipeline"}, "scene": 0})
@@ -151,6 +152,9 @@ def write_glb(model: Model, path, *, name="model", vrm: dict | None = None, mtoo
                 "humanoid": {"humanBones": {bone: {"node": int(k)} for bone, k in vrm["humanBones"].items()}},
             }
         }
+        if spring:
+            j["extensionsUsed"].append("VRMC_springBone")
+            j["extensions"]["VRMC_springBone"] = spring
 
     while len(b.bin) % 4:
         b.bin.append(0)

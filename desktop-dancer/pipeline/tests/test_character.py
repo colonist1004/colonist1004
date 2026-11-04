@@ -220,6 +220,88 @@ def test_fit_to_mesh_upper_body_only_and_cut_hand():
     assert {"hips", "leftLowerArm", "rightHand"} <= used, used
 
 
+def _grid(rows, cols, point, joint):
+    """A connected quad grid: point(i, j) -> xyz for i in rows, j in cols (cols wrap if point says so)."""
+    P = np.array([point(i, j) for i in range(rows) for j in range(cols)], float)
+    tris = []
+    for i in range(rows - 1):
+        for j in range(cols - 1):
+            a, b, c, d = i * cols + j, i * cols + j + 1, (i + 1) * cols + j, (i + 1) * cols + j + 1
+            tris += [a, b, d, a, d, c]
+    J = np.zeros((len(P), 4), np.int64)
+    J[:, 0] = joint
+    W = np.zeros((len(P), 4))
+    W[:, 0] = 1
+    return Prim(P, None, None, J, W, np.array(tris), None)
+
+
+def test_springs_for_long_hair_and_a_skirt():
+    """A body with a skirt around the hips and long hair hanging down the back gets spring chains;
+    the hem and the hair ends move with them, and the hands do not."""
+    from dancer_pipeline.char.springs import add_springs
+
+    m, idx = synthetic_model(prop=False)
+    hips_y, knee_y = REST_POS["hips"][1], REST_POS["leftLowerLeg"][1]
+    # skirt: a closed cone from the waist to above the knees, clear of the legs
+    skirt = _grid(12, 25, lambda i, j: (
+        (0.15 + 0.12 * i / 11) * np.sin(2 * np.pi * j / 24), hips_y + 0.05 - i / 11 * (hips_y + 0.05 - knee_y - 0.05),
+        (0.15 + 0.12 * i / 11) * np.cos(2 * np.pi * j / 24)), idx["hips"])
+    # hair: from the crown over the back of the head down to the middle of the back
+    top = REST_POS["head"][1] + 0.15
+    hair = _grid(30, 9, lambda i, j: (-0.1 + 0.025 * j, top - i * (top - 1.08) / 29,
+                                      -0.1 - 0.06 * min(1, i / 8)), idx["head"])
+    m.prims += [skirt, hair]
+    mp = find_humanoid(m)
+    n = normalize(m, mp, height=1.6)
+    out, ext = add_springs(n, mp.bones)
+    assert ext, "no springs"
+    names = [s_["name"] for s_ in ext["springs"]]
+    assert sum(x.startswith("skirt") for x in names) >= 6, names
+    assert any(x.startswith("hair") for x in names), names
+    assert all(len(s_["joints"]) >= 3 for s_ in ext["springs"])
+    J = len(out.joint_names)
+    spring_nodes = {j["node"] for s_ in ext["springs"] for j in s_["joints"]}
+    assert max(spring_nodes) < J and min(spring_nodes) >= len(n.joint_names)
+    first_spring = len(n.joint_names)
+
+    def share(prim_i, rows):
+        p = out.prims[prim_i]
+        w = p.weights[rows]
+        return float((w * (p.joints[rows] >= first_spring)).sum(1).mean())
+
+    n_body = len(n.prims) - 2
+    sk, hr = n_body, n_body + 1
+    hem = np.arange(11 * 25, 12 * 25)
+    waist = np.arange(0, 25)
+    assert share(sk, hem) > 0.9, share(sk, hem)  # the hem swings
+    assert share(sk, waist) < 0.2, share(sk, waist)  # the waistband stays on the hips
+    ends = np.arange(25 * 9, 30 * 9)
+    assert share(hr, ends) > 0.8, share(hr, ends)
+    body = out.prims[0]
+    front = body.positions[:, 2] > -0.1  # (the fixture's own little hair-tip box hangs behind the head)
+    assert (body.joints[front][body.weights[front] > 0] < first_spring).all(), "the body must not get spring weights"
+    # written into the VRM
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "s.vrm"
+        write_glb(out, f, name="s", vrm={"humanBones": mp.bones, "meta": {"name": "s", "authors": ["t"], "licenseUrl": "x"}},
+                  mtoon={}, spring=ext)
+        data = f.read_bytes()
+        j = json.loads(data[20 : 20 + struct.unpack_from("<I", data, 12)[0]])
+        assert "VRMC_springBone" in j["extensionsUsed"]
+        assert len(j["extensions"]["VRMC_springBone"]["springs"]) == len(ext["springs"])
+        assert j["extensions"]["VRMC_springBone"]["colliderGroups"]
+
+
+def test_no_springs_without_hair_or_skirt():
+    from dancer_pipeline.char.springs import add_springs
+
+    m, _ = synthetic_model(prop=False)
+    mp = find_humanoid(m)
+    n = normalize(m, mp, height=1.6)
+    out, ext = add_springs(n, mp.bones)
+    assert ext is None and len(out.joint_names) == len(n.joint_names)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

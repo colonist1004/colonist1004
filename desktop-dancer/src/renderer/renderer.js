@@ -427,7 +427,20 @@ window.__dancer = () => ({
   expr: { ...life.expr },
   head: life.headPx(camera, window.innerWidth, window.innerHeight),
   hovering,
+  springs: springState(),
 });
+// spring bones (hair, skirt): how many joints, and how far their tips are from where they rest
+function springState() {
+  const mgr = vrm?.springBoneManager;
+  if (!mgr) return null;
+  let n = 0, bend = 0;
+  for (const j of mgr.joints) {
+    n++;
+    const q = j.bone.quaternion;
+    bend = Math.max(bend, 2 * Math.acos(Math.min(1, Math.abs(q.w))));
+  }
+  return { joints: n, maxBendDeg: (bend * 180) / Math.PI };
+}
 window.__dancerSync = () =>
   tempo && music.active && action ? syncRate(tempo, action.time, music.tracker, performance.now() / 1000, settings.speed)?.error : null;
 

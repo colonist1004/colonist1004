@@ -50,6 +50,7 @@ def parse_args(argv=None):
     p.add_argument("--flip", action="store_true", help="앞뒤 반대로 (결과가 뒤돌아 있을 때)")
     p.add_argument("--no-tpose", action="store_true", help="T포즈로 펴지 않음")
     p.add_argument("--shading", choices=["toon", "soft"], default="toon", help="toon: 애니풍(외곽선 포함) / soft: 부드러운 음영")
+    p.add_argument("--no-springs", action="store_true", help="자동 리깅 때 머리카락·치마 흔들림 뼈를 넣지 않음")
     p.add_argument("--autorig", action="store_true", help="기존 뼈대를 무시하고 내 PC에서 자동 리깅 (뼈대 없는 GLB는 항상 자동)")
     p.add_argument("--author", default="Desktop Dancer user")
     p.add_argument("--progress-json", action="store_true")
@@ -108,6 +109,13 @@ def _main(a, pr):
     model = normalize(model, mapping, height=a.height, flip=a.flip, tpose=not a.no_tpose,
                       on_step=lambda f: pr.stage("pose", f))
 
+    spring = None
+    if autorigged and not a.no_springs:
+        from dancer_pipeline.char.springs import add_springs
+
+        pr.stage("save", 0, "머리카락·치마 흔들림 넣는 중")
+        model, spring = add_springs(model, mapping.bones, log=pr.log)
+
     pr.stage("save", 0, "VRM 저장 중")
     name = a.name or src.stem
     out = Path(a.out) if a.out else app_data_dir() / "library" / "characters"
@@ -131,7 +139,8 @@ def _main(a, pr):
         "allowPoliticalOrReligiousUsage": False,
         "allowAntisocialOrHateUsage": False,
     }
-    write_glb(model, out, name=name, vrm={"humanBones": mapping.bones, "meta": meta}, mtoon=dict(MTOON[a.shading]))
+    write_glb(model, out, name=name, vrm={"humanBones": mapping.bones, "meta": meta}, mtoon=dict(MTOON[a.shading]),
+              spring=spring)
     info = {
         "name": name,
         "source": str(src),
@@ -140,7 +149,7 @@ def _main(a, pr):
         "triangles": tris,
         "warnings": mapping.warnings,
         "options": {"height": a.height, "flip": a.flip, "tpose": not a.no_tpose, "shading": a.shading,
-                    "autorig": autorigged},
+                    "autorig": autorigged, "springs": len(spring["springs"]) if spring else 0},
     }
     out.with_suffix(".json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
     pr.log(f"saved {out}")
