@@ -27,6 +27,10 @@ jobs:
         run: python tests/test_bvh.py
       - name: RTMW3D conversion tests (depth sign/scale calibration)
         run: python tests/test_rtm.py
+      - name: Local 3D generation post-processing (orientation, UV bake; no GPU, no weights)
+        run: |
+          pip install opencv-python-headless trimesh xatlas fast-simplification scipy
+          python tests/test_gen.py
 
   build:
     runs-on: windows-latest

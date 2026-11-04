@@ -1,0 +1,20 @@
+# Local 3D generation (gen_local.py), installed into its own environment (userData/gen-env)
+# after PyTorch for the graphics card (gen_setup.py picks AMD ROCm / NVIDIA CUDA / CPU wheels).
+numpy>=1.26,<2.3
+scipy
+pillow
+opencv-python-headless
+scikit-image
+trimesh
+xatlas
+fast-simplification
+rembg
+onnxruntime
+huggingface_hub
+diffusers>=0.32,<1
+transformers>=4.44,<5
+einops
+omegaconf
+peft
+jaxtyping
+typeguard

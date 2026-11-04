@@ -76,8 +76,54 @@
       <section class="card">
         <h2><span class="step">2</span> 그림을 3D로 만들기 — 방법 고르기</h2>
         <div class="routes">
-          <details class="route" open>
-            <summary><b>A. 무료 웹 생성기 + 내 PC 자동 리깅</b> <span class="tag">추천 · 그래픽카드 상관없음</span></summary>
+          <details class="route" id="route-local" open>
+            <summary><b>내 PC 그래픽카드로 만들기 (TripoSG / TripoSR)</b> <span class="tag">AMD·NVIDIA · 무료 · 오프라인</span></summary>
+            <p class="muted tight" id="gen-gpu">그래픽카드 확인 중…</p>
+            <div id="gen-setup-box" hidden>
+              <p>
+                처음 한 번 <b>준비</b>가 필요합니다. 그래픽카드용 PyTorch와 생성 AI 프로그램을 앱 전용 폴더에 설치합니다
+                (수 GB, 10~30분). 모델 파일(수 GB)은 처음 만들 때 내려받습니다.
+              </p>
+              <p class="hint" id="gen-amd-note" hidden>AMD: 그래픽 드라이버 <b>Adrenalin 26.2.2 이상</b>이 필요합니다 (AMD 공식 PyTorch for Windows, RX 7000·9000 시리즈).</p>
+              <div class="row">
+                <select id="gen-vendor">
+                  <option value="amd">AMD 그래픽카드 (ROCm)</option>
+                  <option value="nvidia">NVIDIA 그래픽카드 (CUDA)</option>
+                  <option value="cpu">그래픽카드 없이 CPU (TripoSR만, 느림)</option>
+                </select>
+                <button id="btn-gen-setup" class="primary">준비하기 (설치)</button>
+              </div>
+              <pre id="gen-setup-log" class="log" hidden></pre>
+            </div>
+            <div id="gen-run-box" hidden>
+              <div class="grid">
+                <span>모델</span>
+                <div class="seg" id="gen-model">
+                  <button data-v="triposg" class="on">TripoSG (모양 정교)</button>
+                  <button data-v="triposr">TripoSR (가볍고 색까지)</button>
+                </div>
+                <span>품질</span>
+                <div class="seg" id="gen-steps">
+                  <button data-v="25">빠르게</button>
+                  <button data-v="50" class="on">보통</button>
+                </div>
+                <span>그림 종류</span>
+                <label class="check"><input id="gen-realistic" type="checkbox" /> 실사 사진 (애니 그림이 아님)</label>
+              </div>
+              <div class="row mt12">
+                <button id="btn-gen" class="primary big">3D 모델 만들기 → 뼈대까지 자동</button>
+                <button id="btn-gen-cancel" hidden>취소</button>
+                <button id="btn-gen-reinstall" class="link">다시 설치</button>
+              </div>
+              <p class="hint">
+                결과는 3번으로 이어져 뼈대·흔들림까지 자동으로 넣습니다. TripoSG는 그림의 색을 모델에 입히고(뒷면은 근사),
+                TripoSR은 색까지 스스로 만듭니다. 두 모델 모두 MIT 라이선스입니다 (TripoSG 저장소에는 일부 코드가 Tencent Hunyuan
+                계열에서 왔다는 안내가 있습니다).
+              </p>
+            </div>
+          </details>
+          <details class="route">
+            <summary><b>A. 무료 웹 생성기 + 내 PC 자동 리깅</b> <span class="tag">그래픽카드 상관없음</span></summary>
             <ol class="steps">
               <li>아래 사이트 중 하나에서 1번의 그림을 올려 3D 모델을 만들고 <b>GLB</b>로 내려받습니다.
                 <div class="row">

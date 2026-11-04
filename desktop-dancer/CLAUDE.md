@@ -49,6 +49,13 @@ This folder is separate from the photo editor at the repo root and has its own `
   - Colliders sit on the torso, head and thighs. Everything is written as `VRMC_springBone` (`write_glb(spring=...)`), and three-vrm simulates it.
   - Limit: the geometric fallback (no MediaPipe) finds the crotch at a skirt's hem, so it finds no skirt.
 - Dance extraction: knees and ankles that are not seen confidently inside the frame (each engine returns `legs`) ease into a standing pose (`post.legs_seen` and `post.stand_unseen_legs`). Dips shorter than 0.3 s are ignored.
+- Local 3D generation (the "내 PC 그래픽카드로 만들기" route):
+  - `gen_local.py` runs TripoSG or TripoSR (MIT; upstream code pinned in `dancer_pipeline/gen_sources.py`, weights from Hugging Face on first use). The pipeline is rembg (isnet-anime) → model → `char/bake.py`, which drops floaters, decimates, orients (the best of 24 axis rotations by silhouette IoU against the picture mask, toes decide front/back), unwraps with xatlas and bakes a texture. TripoSR's own color field is queried in model space; TripoSG gets the picture projected from the front, with back faces taking the outline colors of the same height.
+  - Stubs replace CUDA-only imports: `diso` (TripoSG decodes with marching cubes, `use_flash_decoder=False`) and `torchmcubes` (scikit-image).
+  - It runs in its own env `userData/gen-env`, set up by `gen_setup.py`. AMD gets the official Windows ROCm 7.2.1 wheels, read from the repo.radeon.com listing with the SDK first. NVIDIA gets cu128 and the CPU path gets CPU wheels. torch is pinned by a constraints file, then `requirements-gen.txt` is installed, then the sources are downloaded.
+  - `pipeline-runner.js` adds `genStatus` (GPU detection via Win32_VideoController), `setupGen` and `runGen`. The char studio chains the generated GLB into make_character (autorig).
+  - Tests: `tests/test_gen.py` (CI installs cv2/trimesh/xatlas). For E2E, `DANCER_GEN_PYTHON` and `DANCER_GEN_FAKE=<mesh>` stand in for the model.
+  - Not verified here: real weights (Hugging Face is blocked in this sandbox) and an AMD GPU.
 - Slider tweaks live in `src/renderer/customize.js`. They are stored per character as `library/characters/<name>.custom.json` and applied at load in both the dancer and the preview. They never modify the VRM.
 - Preview any model with `node scripts/preview/preview.mjs model.vrm out.png [--motion m.vrma --t 1.5] [--skeleton]`. Set `NODE_PATH` to the global node_modules for playwright.
 

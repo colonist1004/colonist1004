@@ -112,16 +112,18 @@ async function status() {
 
 function stream(cmd, args, onLine, opts = {}) {
   return new Promise((resolve, reject) => {
+    const { env: extraEnv, ...rest } = opts;
     const child = spawn(cmd, args, {
       windowsHide: true,
+      ...rest,
       env: {
         ...process.env,
         PYTHONUNBUFFERED: '1',
         PYTHONIOENCODING: 'utf-8',
         PIP_DISABLE_PIP_VERSION_CHECK: '1',
         DANCER_DATA_DIR: app.getPath('userData'), // pipeline cache + library = the app's folder
+        ...(extraEnv || {}),
       },
-      ...opts,
     });
     current = child;
     let tail = [];
@@ -249,12 +251,12 @@ function buildArgs(o, outDir) {
 }
 
 /** Runs a pipeline script (default extract_dance.py); onEvent gets parsed {type: progress|log|done|error} events. */
-function runJob(argv, onEvent, scriptName = 'extract_dance.py') {
+function runJob(argv, onEvent, scriptName = 'extract_dance.py', python = envPython(), opts = {}) {
   if (current) throw new Error('이미 작업 중입니다');
   const script = path.join(pipelineDir(), scriptName);
   let finished = null;
   const flag = scriptName === 'check_image.py' ? '--json' : '--progress-json';
-  const p = stream(envPython(), [script, ...argv, flag], (line) => {
+  const p = stream(python, [script, ...argv, flag], (line) => {
     if (line.startsWith('@@')) {
       try {
         const ev = JSON.parse(line.slice(2));
@@ -266,7 +268,7 @@ function runJob(argv, onEvent, scriptName = 'extract_dance.py') {
     } else {
       onEvent({ type: 'log', msg: line });
     }
-  });
+  }, opts);
   return p.then(
     () => finished || { type: 'done' },
     (err) => {
@@ -293,4 +295,86 @@ function buildCharArgs(o, outDir) {
   return args;
 }
 
-module.exports = { init, status, setup, runJob, buildArgs, buildCharArgs, cancel, cacheDir, pipelineDir, safeName };
+// ------------------------------------------------- local 3D generation (gen-env)
+// Picture -> 3D on this PC's graphics card (TripoSG / TripoSR, gen_local.py). Its own environment,
+// because PyTorch for the card is several GB and differs per vendor (AMD ROCm / NVIDIA CUDA / CPU).
+const genEnvDir = () => path.join(app.getPath('userData'), 'gen-env');
+const genPython = () =>
+  process.env.DANCER_GEN_PYTHON ||
+  (process.platform === 'win32' ? path.join(genEnvDir(), 'Scripts', 'python.exe') : path.join(genEnvDir(), 'bin', 'python'));
+const genStampFile = () => path.join(genEnvDir(), 'desktop-dancer-gen.txt');
+const genOutDir = () => path.join(app.getPath('userData'), 'gen-out');
+const genEnv = () => ({
+  HF_HOME: path.join(app.getPath('userData'), 'gen-cache', 'hf'), // model weights stay in the app's folder
+  U2NET_HOME: path.join(app.getPath('userData'), 'gen-cache', 'rembg'),
+});
+
+function genHash(vendor) {
+  const h = crypto.createHash('sha1').update(String(vendor));
+  for (const f of ['requirements-gen.txt', 'gen_setup.py']) {
+    const p = path.join(pipelineDir(), f);
+    if (fs.existsSync(p)) h.update(fs.readFileSync(p));
+  }
+  return h.digest('hex');
+}
+
+/** Graphics cards in this PC -> 'amd' | 'nvidia' | 'cpu' (a discrete card wins over integrated graphics). */
+async function detectGpu() {
+  let names = [];
+  if (process.platform === 'win32') {
+    const out = await run('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_VideoController).Name']);
+    names = (out || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  } else {
+    const out = await run('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']);
+    if (out) names = out.split('\n').map((x) => x.trim()).filter(Boolean);
+  }
+  const vendor = names.some((n) => /nvidia|geforce|rtx/i.test(n))
+    ? 'nvidia'
+    : names.some((n) => /radeon\s*(rx|pro|ai)|\brx\s*\d{4}/i.test(n))
+      ? 'amd'
+      : 'cpu';
+  return { vendor, names };
+}
+
+async function genStatus() {
+  const gpu = await detectGpu();
+  let stamp = null;
+  try {
+    stamp = fs.readFileSync(genStampFile(), 'utf8');
+  } catch {}
+  const [vendor, hash] = (stamp || '').split(' ');
+  const ready = !!process.env.DANCER_GEN_PYTHON || (fs.existsSync(genPython()) && !!vendor && hash === genHash(vendor));
+  return { ready, installedFor: ready ? vendor || 'custom' : null, gpu };
+}
+
+async function setupGen(vendor, onLine) {
+  if (!['amd', 'nvidia', 'cpu'].includes(vendor)) throw new Error('알 수 없는 그래픽카드 종류');
+  const uv = await ensureUv(onLine);
+  const env = { env: { ...uvEnv(), ...genEnv() } };
+  fs.rmSync(genEnvDir(), { recursive: true, force: true });
+  onLine('Python 3.12 준비 중…');
+  await stream(uv, ['venv', '--python', '3.12', '--python-preference', 'only-managed', genEnvDir()], onLine, env);
+  await stream(genPython(), [path.join(pipelineDir(), 'gen_setup.py'), '--uv', uv, '--vendor', vendor], onLine, env);
+  fs.writeFileSync(genStampFile(), `${vendor} ${genHash(vendor)}`);
+}
+
+/** gen_local.py arguments from validated options. */
+function buildGenArgs(o) {
+  if (typeof o.image !== 'string' || !/\.(png|jpe?g|webp)$/i.test(o.image)) throw new Error('1번에서 그림을 먼저 고르세요');
+  fs.mkdirSync(genOutDir(), { recursive: true });
+  const out = path.join(genOutDir(), `${safeName(o.name)}.glb`);
+  const args = [o.image, '--out', out, '--model', o.model === 'triposr' ? 'triposr' : 'triposg'];
+  if (Number.isInteger(o.steps) && o.steps >= 10 && o.steps <= 100) args.push('--steps', String(o.steps));
+  if (o.device === 'cpu') args.push('--device', 'cpu');
+  if (o.realistic) args.push('--realistic');
+  return args;
+}
+
+function runGen(opts, onEvent) {
+  return runJob(buildGenArgs(opts), onEvent, 'gen_local.py', genPython(), { env: genEnv() });
+}
+
+module.exports = {
+  init, status, setup, runJob, buildArgs, buildCharArgs, cancel, cacheDir, pipelineDir, safeName,
+  genStatus, setupGen, runGen, detectGpu,
+};

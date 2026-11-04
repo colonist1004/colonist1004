@@ -841,6 +841,25 @@ ipcMain.handle('char:check-image', async (e, file) => {
   }
 });
 
+// Picture -> 3D on this PC's graphics card (TripoSG / TripoSR)
+ipcMain.handle('char:gen-status', () => runner.genStatus());
+ipcMain.handle('char:gen-setup', async (e, vendor) => {
+  try {
+    await runner.setupGen(vendor, reply(e, 'char:gen-log'));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('char:gen-run', async (e, opts) => {
+  try {
+    return await runner.runGen(opts || {}, reply(e, 'char:job'));
+  } catch (err) {
+    return { type: 'error', msg: err.message };
+  }
+});
+ipcMain.handle('char:cancel', () => runner.cancel());
+
 ipcMain.handle('char:convert', async (e, opts) => {
   try {
     ensureUserLibrary();

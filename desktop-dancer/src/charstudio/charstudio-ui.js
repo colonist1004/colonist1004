@@ -3,7 +3,8 @@ const api = window.charStudio;
 const $ = (id) => document.getElementById(id);
 const show = (id, on) => ($(id).hidden = !on);
 
-const state = { model: null, result: null, shading: 'toon', flip: false, running: false };
+const state = { model: null, result: null, shading: 'toon', flip: false, running: false, image: null,
+  genModel: 'triposg', genSteps: '50' };
 
 // ------------------------------------------------------------------ setup
 async function checkSetup() {
@@ -57,6 +58,7 @@ window.addEventListener('drop', (e) => e.preventDefault());
 // ------------------------------------------------------------------ 1. image
 dropZone('drop-img', 'file-img', async (file) => {
   const p = api.pathForFile(file);
+  state.image = p;
   const img = $('img-preview');
   img.src = URL.createObjectURL(file);
   img.hidden = false;
@@ -66,7 +68,9 @@ dropZone('drop-img', 'file-img', async (file) => {
   if (!$('name').value) $('name').value = fname.replace(/\.[^.]+$/, '');
   const list = $('checks');
   list.innerHTML = '<li class="wait">그림 확인 중…</li>';
-  const r = await api.checkImage(p);
+  state.checking = api.checkImage(p); // one pipeline job at a time: generating waits for this
+  const r = await state.checking;
+  state.checking = null;
   list.innerHTML = '';
   for (const c of r.checks || [{ level: 'info', msg: r.msg || '확인하지 못했습니다' }]) {
     const li = document.createElement('li');
@@ -83,6 +87,90 @@ $('btn-copy').onclick = async () => {
   $('btn-copy').textContent = '복사됨 ✓';
   setTimeout(() => ($('btn-copy').textContent = '복사'), 1500);
 };
+
+// ------------------------------------------------- 2. on this PC's graphics card
+const VENDOR_LABEL = { amd: 'AMD', nvidia: 'NVIDIA', cpu: 'CPU' };
+async function refreshGen() {
+  const st = await api.genStatus();
+  const names = st.gpu?.names?.length ? st.gpu.names.join(', ') : '알 수 없음';
+  $('gen-gpu').textContent = st.ready
+    ? `준비됨 (${VENDOR_LABEL[st.installedFor] || st.installedFor}) · 그래픽카드: ${names}`
+    : `그래픽카드: ${names}`;
+  if (!st.ready) $('gen-vendor').value = st.gpu?.vendor || 'cpu';
+  show('gen-amd-note', $('gen-vendor').value === 'amd');
+  show('gen-setup-box', !st.ready);
+  show('gen-run-box', st.ready);
+  if (st.installedFor === 'cpu') {
+    state.genModel = 'triposr';
+    for (const b of $('gen-model').querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === 'triposr');
+  }
+  state.genDevice = st.installedFor === 'cpu' ? 'cpu' : 'auto';
+}
+$('gen-vendor').addEventListener('change', () => show('gen-amd-note', $('gen-vendor').value === 'amd'));
+$('btn-gen-setup').onclick = async () => {
+  const btn = $('btn-gen-setup');
+  btn.disabled = true;
+  btn.textContent = '설치 중… (오래 걸립니다)';
+  const logEl = $('gen-setup-log');
+  logEl.hidden = false;
+  logEl.textContent = '';
+  const off = api.onGenLog((l) => {
+    logEl.textContent += l + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+  const r = await api.genSetup($('gen-vendor').value);
+  off();
+  btn.disabled = false;
+  btn.textContent = '준비하기 (설치)';
+  if (!r.ok) {
+    logEl.textContent += `\n설치 실패: ${r.error}`;
+    return;
+  }
+  refreshGen();
+};
+$('btn-gen-reinstall').onclick = () => {
+  show('gen-run-box', false);
+  show('gen-setup-box', true);
+};
+segment('gen-model', 'genModel');
+segment('gen-steps', 'genSteps');
+$('btn-gen').onclick = async () => {
+  if (state.running) return;
+  if (!state.image) return showError('1번에서 캐릭터 그림을 먼저 고르세요.');
+  state.running = true;
+  if (state.checking) {
+    setProgress(0, '그림 확인이 끝나기를 기다리는 중…');
+    await state.checking.catch(() => {});
+  }
+  $('btn-gen').disabled = true;
+  show('btn-gen-cancel', true);
+  show('error', false);
+  $('log').textContent = '';
+  setProgress(0, '시작하는 중…');
+  const name = $('name').value.trim() || 'character';
+  const r = await api.genRun({
+    image: state.image,
+    name,
+    model: state.genModel,
+    steps: Number(state.genSteps),
+    device: state.genDevice,
+    realistic: $('gen-realistic').checked,
+  });
+  state.running = false;
+  $('btn-gen').disabled = false;
+  show('btn-gen-cancel', false);
+  if (r.type !== 'done' || !r.out) {
+    show('progress', false);
+    return showError(`3D 모델을 만들지 못했습니다.\n${r.msg || ''}`);
+  }
+  // straight on to rigging (step 3) with the generated model
+  state.model = r.out;
+  state.flip = false;
+  show('glb-options', true);
+  $('autorig').checked = true;
+  await convert();
+};
+$('btn-gen-cancel').onclick = () => api.cancel();
 
 // ------------------------------------------------------------------ 3. import
 function segment(id, key) {
@@ -212,6 +300,7 @@ for (const b of document.querySelectorAll('[data-link]')) b.onclick = () => api.
 
 // Show the library right away so existing characters can be tweaked too.
 const whenPreview = () => new Promise((r) => (window.charPreview ? r() : setTimeout(() => whenPreview().then(r), 50)));
+refreshGen();
 checkSetup().then(async () => {
   await whenPreview();
   const pick = await refreshCharacters();

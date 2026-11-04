@@ -24,4 +24,9 @@ contextBridge.exposeInMainWorld('charStudio', {
   getCustom: (p) => ipcRenderer.invoke('custom:get', p),
   setCustom: (p, c) => ipcRenderer.invoke('custom:set', p, c),
   openLink: (url) => ipcRenderer.invoke('studio:open-link', url),
+  genStatus: () => ipcRenderer.invoke('char:gen-status'),
+  genSetup: (vendor) => ipcRenderer.invoke('char:gen-setup', vendor),
+  onGenLog: (cb) => subscribe('char:gen-log', cb),
+  genRun: (opts) => ipcRenderer.invoke('char:gen-run', opts),
+  cancel: () => ipcRenderer.invoke('char:cancel'),
 });
