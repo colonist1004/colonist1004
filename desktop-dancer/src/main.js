@@ -7,6 +7,7 @@ const path = require('node:path');
 const settings = require('./settings');
 const placement = require('./placement');
 const runner = require('./pipeline-runner');
+const wander = require('./wander');
 
 // Keep one data folder name in dev and packaged builds (the packaged app would otherwise use the
 // productName "Desktop Dancer"). The Python pipeline writes motions into this same folder.
@@ -112,6 +113,7 @@ function placementState() {
 
 /** Partial update from the placement window / mouse wheel / tray, validated. */
 function updatePlacement(patch) {
+  if (walk) endWalk();
   const d = targetDisplay();
   const cur = settings.get();
   const next = {};
@@ -198,6 +200,71 @@ function startCursorFeed() {
     win.webContents.send('cursor', { x: p.x - b.x, y: p.y - b.y });
   }, 50);
 }
+
+// ------------------------------------------------------------------ 산책
+
+// Now and then the character walks along the taskbar: main slides the window, the renderer plays a
+// walk cycle facing the way it goes. The position is saved only when the walk ends.
+let walk = null;
+let walkTimer = null;
+let wanderTimer = null;
+let rendererBusy = false; // dancing to music: no walks then
+
+function scheduleWander() {
+  clearTimeout(wanderTimer);
+  if (settings.get().wander === false) return;
+  wanderTimer = setTimeout(startWalk, wander.nextDelay() * 1000);
+}
+
+function startWalk() {
+  const s = settings.get();
+  if (!win || win.isDestroyed() || !s.visible || dragStart || walk || rendererBusy || placeWin) return scheduleWander();
+  const p = wander.plan(targetDisplay(), s);
+  if (!p) return scheduleWander();
+  walk = { ...p, x: p.from, started: false, last: 0 };
+  win.webContents.send('walk', { phase: 'start', dir: p.dir });
+  // turn first, then go
+  setTimeout(() => {
+    if (!walk) return;
+    walk.started = true;
+    walk.last = Date.now();
+  }, 450);
+  clearInterval(walkTimer);
+  walkTimer = setInterval(stepWalk, 16);
+}
+
+function stepWalk() {
+  if (!walk || !walk.started || !win) return;
+  const now = Date.now();
+  const dt = Math.min(0.1, (now - walk.last) / 1000);
+  walk.last = now;
+  walk.x += walk.dir * walk.speed * dt;
+  const done = walk.dir > 0 ? walk.x >= walk.to : walk.x <= walk.to;
+  if (done) walk.x = walk.to;
+  const d = targetDisplay();
+  const b = placement.computeBounds(d, { ...settings.get(), xCenter: walk.x / d.workArea.width });
+  win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+  win.webContents.send('frame', frameInfo(b));
+  if (done) endWalk();
+}
+
+/** Stop walking where the character is now (arrived, or interrupted by a drag / placement change). */
+function endWalk() {
+  clearInterval(walkTimer);
+  walkTimer = null;
+  if (!walk) return;
+  const d = targetDisplay();
+  settings.update({ xCenter: walk.x / d.workArea.width });
+  walk = null;
+  win?.webContents.send('walk', { phase: 'stop' });
+  placeWin?.webContents.send('place:changed', placementState());
+  scheduleWander();
+}
+
+ipcMain.on('busy', (_e, v) => {
+  rendererBusy = !!v;
+  if (rendererBusy && walk) endWalk();
+});
 
 // "음악에 맞춰 춤추기": the dancer window asks for the screen with system-audio loopback
 // (Windows); only the sound is used and it never leaves the renderer.
@@ -418,6 +485,7 @@ function rebuildTrayMenu() {
         { label: '마우스 쳐다보기', key: 'lookAt' },
         { label: '클릭·쓰다듬기·들어 올리기 반응', key: 'reactions' },
         { label: '음악에 맞춰 춤추기 (PC 소리 듣기)', key: 'music' },
+        { label: '가끔 작업표시줄 위를 산책하기', key: 'wander' },
       ].map(({ label, key }) => ({
         label,
         type: 'checkbox',
@@ -425,6 +493,10 @@ function rebuildTrayMenu() {
         click: (item) => {
           settings.update({ [key]: item.checked });
           win?.webContents.send('settings', settings.get());
+          if (key === 'wander') {
+            if (!item.checked && walk) endWalk();
+            scheduleWander();
+          }
           rebuildTrayMenu();
         },
       })),
@@ -534,6 +606,7 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
   if (!win) return;
   const d = targetDisplay();
   if (phase === 'start') {
+    if (walk) endWalk();
     dragStart = { mouseX: screenX, mouseY: screenY, ...placement.frameAnchor(d, settings.get()) };
   } else if (phase === 'move' && dragStart) {
     const scale = placement.clampScale(settings.get().scale);
@@ -849,6 +922,7 @@ if (!app.requestSingleInstanceLock()) {
     watchLibrary();
     allowSystemAudio();
     createWindow();
+    scheduleWander();
     tray = new Tray(trayIcon());
     tray.setToolTip('Desktop Dancer');
     tray.on('click', () => setVisible(!settings.get().visible));

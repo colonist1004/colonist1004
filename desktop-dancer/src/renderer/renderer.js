@@ -72,6 +72,7 @@ async function parseFile(file) {
 function frameCharacter() {
   if (!vrm) return;
   holder.position.set(0, 0, 0);
+  holder.rotation.set(0, 0, 0);
   // Height from the rest pose so the camera does not jump while dancing.
   const box = new THREE.Box3().setFromObject(vrm.scene);
   const height = Math.max(0.5, box.max.y);
@@ -401,6 +402,13 @@ api.onSettings((s) => {
   syncMusic();
 });
 api.onCursor?.((p) => life.setCursor(p));
+api.onWalk?.((w) => life.setWalk(w.phase === 'start', w.dir));
+// tell main when dancing to music (no walks then)
+let wasBusy = false;
+setInterval(() => {
+  const busy = music.active && !!tempo;
+  if (busy !== wasBusy) api.setBusy?.((wasBusy = busy));
+}, 1000);
 
 const fakeMusic = Number(new URLSearchParams(location.search).get('fakeMusic') || 0);
 function syncMusic() {
@@ -415,6 +423,7 @@ function syncMusic() {
 window.__dancer = () => ({
   music: { running: music.running, active: music.active, bpm: music.tracker.bpm, confidence: music.tracker.confidence },
   tempo, timeScale, holdingPose, look: { ...life.look }, react: life.react?.kind || null, drag: life.drag.w,
+  walk: { on: life.walk.on, w: life.walk.w, yaw: life.walk.yaw },
   expr: { ...life.expr },
   head: life.headPx(camera, window.innerWidth, window.innerHeight),
   hovering,

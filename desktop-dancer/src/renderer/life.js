@@ -20,16 +20,22 @@ class Offsets {
 
   /** Start of a frame, before the mixer: undo last frame's offsets on bones the mixer will not reset. */
   begin() {
-    for (const [n, { base, after }] of this.map) if (after && n.quaternion.equals(after)) n.quaternion.copy(base);
+    for (const [n, v] of this.map) {
+      if (v.after && n.quaternion.equals(v.after)) n.quaternion.copy(v.base);
+      if (v.posAfter && n.position.equals(v.posAfter)) n.position.copy(v.pos);
+    }
     this.map.clear();
   }
 
   touch(n) {
-    if (!this.map.has(n)) this.map.set(n, { base: n.quaternion.clone(), after: null });
+    if (!this.map.has(n)) this.map.set(n, { base: n.quaternion.clone(), after: null, pos: n.position.clone(), posAfter: null });
   }
 
   end() {
-    for (const [n, v] of this.map) v.after = n.quaternion.clone();
+    for (const [n, v] of this.map) {
+      v.after = n.quaternion.clone();
+      v.posAfter = n.position.clone();
+    }
   }
 }
 
@@ -47,6 +53,7 @@ export class Life {
     this.react = null; // { kind, t0, dur }
     this.clicks = [];
     this.pat = { lastX: null, dir: 0, run: 0, flips: [], until: 0 };
+    this.walk = { on: false, dir: 1, w: 0, yaw: 0, phase: 0 };
     this.drag = { on: false, w: 0, vx: 0, vy: 0, lastX: 0, lastY: 0, lastT: 0, ax: 0, swing: 0, swingV: 0 };
     this.expr = {};
     this.height = 1.6;
@@ -61,6 +68,7 @@ export class Life {
     if (vrm.lookAt) vrm.lookAt.target = this.opts.lookAt ? this.target : null;
     const head = vrm.humanoid.getNormalizedBoneNode('head');
     this.height = head ? Math.max(0.5, head.getWorldPosition(_v).y + 0.15) : 1.6;
+    this.hipsRest = vrm.humanoid.getNormalizedBoneNode('hips')?.position.clone() || null;
     this.react = null;
   }
 
@@ -150,9 +158,15 @@ export class Life {
     this.react = { kind, t0: this.t, dur };
   }
 
-  /** How much the dance should slow down (0..1) while the character is held. */
+  /** Walking along the taskbar: dir +1 = to the right of the screen. */
+  setWalk(on, dir = 1) {
+    this.walk.on = on;
+    if (on) this.walk.dir = dir;
+  }
+
+  /** How much the dance should pause (0..1): while held or walking. */
   get holdFactor() {
-    return this.drag.w;
+    return Math.max(this.drag.w, this.walk.w);
   }
 
   // -------------------------------------------------------------- frame
@@ -253,8 +267,38 @@ export class Life {
       rot('spine', 0, 0, -0.4 * d.swing * w);
     }
 
+    // --- walking: turn toward where it goes, walk cycle on top of everything, standing hips height
+    const wk = this.walk;
+    wk.w += ((wk.on ? 1 : 0) - wk.w) * Math.min(1, dt * (wk.on ? 4 : 3));
+    const yawTarget = wk.on ? wk.dir * 1.2 : 0; // ~70 degrees: a profile that still shows the face
+    wk.yaw += (yawTarget - wk.yaw) * Math.min(1, dt * 5);
+    if (this.holder) this.holder.rotation.y = wk.yaw;
+    if (wk.w > 0.01) {
+      const w = wk.w;
+      wk.phase += dt * 2 * Math.PI * 0.95; // ~1.9 steps per second
+      for (const [side, s] of [['left', 1], ['right', -1]]) {
+        const ph = wk.phase + (s > 0 ? 0 : Math.PI);
+        const knee = 0.12 + 0.7 * Math.max(0, Math.cos(ph)) ** 1.5; // bends while the leg swings forward
+        toward(`${side}UpperLeg`, -0.42 * Math.sin(ph), 0, s * 0.03, w);
+        toward(`${side}LowerLeg`, knee, 0, 0, w);
+        toward(`${side}Foot`, 0.12 * Math.sin(ph) - 0.05, 0, 0, w);
+        toward(`${side}UpperArm`, 0.35 * Math.sin(ph), 0, -s * 1.25, w); // opposite to the leg on its side
+        toward(`${side}LowerArm`, 0, -s * 0.35, 0, w);
+        toward(`${side}Hand`, 0, 0, 0, w);
+      }
+      toward('spine', 0.04, 0.08 * Math.sin(wk.phase), 0, w);
+      toward('chest', 0, 0.05 * Math.sin(wk.phase), 0, w);
+      toward('hips', 0, -0.06 * Math.sin(wk.phase), 0, w);
+      const hips = node('hips');
+      if (hips && this.hipsRest) {
+        this.offsets.touch(hips);
+        const bob = 0.012 * this.height * Math.abs(Math.cos(wk.phase));
+        hips.position.lerp(_v.set(this.hipsRest.x, this.hipsRest.y - bob, this.hipsRest.z), w);
+      }
+    }
+
     // --- breathing in a still pose / nodding to music
-    if (ctx.still || !ctx.dancing) {
+    if ((ctx.still || !ctx.dancing) && wk.w < 0.5) {
       const b = Math.sin(t * 1.6);
       rot('chest', -0.025 * b, 0, 0);
       rot('upperChest', -0.015 * b, 0, 0);
@@ -288,7 +332,7 @@ export class Life {
       this.look.yaw += (yaw - this.look.yaw) * k;
       this.look.pitch += (pitch - this.look.pitch) * k;
       const idle = t - this.cursorMovedAt > 8 ? 0.35 : 1; // looked long enough: only glance
-      lookW = (ctx.dancing && !ctx.still ? 0.35 : 0.85) * idle * (1 - d.w) * (1 - 0.6 * this._patW);
+      lookW = (ctx.dancing && !ctx.still ? 0.35 : 0.85) * idle * (1 - d.w) * (1 - 0.6 * this._patW) * (1 - 0.7 * wk.w);
     }
     this.look.w += (lookW - this.look.w) * Math.min(1, dt * 3);
     if (this.look.w > 0.01) {

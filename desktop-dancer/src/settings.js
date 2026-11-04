@@ -17,6 +17,7 @@ const DEFAULTS = {
   lookAt: true, // eyes and head follow the mouse cursor
   reactions: true, // clicks, patting, dangling when dragged
   music: false, // listen to the PC's sound and dance on its beat
+  wander: true, // now and then walk along the taskbar to another spot
 };
 
 let file = null;
