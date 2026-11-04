@@ -14,6 +14,9 @@ const DEFAULTS = {
   motion: null,
   speed: 1,
   fps: 30,
+  lookAt: true, // eyes and head follow the mouse cursor
+  reactions: true, // clicks, patting, dangling when dragged
+  music: false, // listen to the PC's sound and dance on its beat
 };
 
 let file = null;

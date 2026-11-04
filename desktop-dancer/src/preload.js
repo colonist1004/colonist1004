@@ -14,4 +14,5 @@ contextBridge.exposeInMainWorld('dancer', {
   onCustom: (cb) => ipcRenderer.on('custom-updated', (_e, v) => cb(v)),
   onLoad: (cb) => ipcRenderer.on('load', (_e, v) => cb(v)),
   onSettings: (cb) => ipcRenderer.on('settings', (_e, v) => cb(v)),
+  onCursor: (cb) => ipcRenderer.on('cursor', (_e, v) => cb(v)),
 });

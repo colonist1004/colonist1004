@@ -1,7 +1,7 @@
 // Desktop Dancer — Electron main process.
 // Transparent, frameless, always-on-top window that sits on top of the Windows taskbar
 // and renders a VRM character playing a VRMA dance.
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, dialog, shell, net } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, dialog, shell, net, session, desktopCapturer } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const settings = require('./settings');
@@ -171,12 +171,45 @@ function createWindow() {
   const query = {};
   if (process.env.DANCER_FREEZE_T) query.t = process.env.DANCER_FREEZE_T;
   if (process.env.DANCER_RECORD) query.record = process.env.DANCER_RECORD_FRAMES || '240';
+  // DANCER_FAKE_MUSIC=128: a generated drum loop instead of the PC's sound (dev/tests; never audible)
+  if (process.env.DANCER_FAKE_MUSIC) query.fakeMusic = process.env.DANCER_FAKE_MUSIC;
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: Object.keys(query).length ? query : undefined });
   win.once('ready-to-show', () => {
     if (settings.get().visible) win.showInactive();
   });
   win.webContents.on('did-finish-load', placeWindow); // sends the frame info
   win.on('closed', () => (win = null));
+  startCursorFeed();
+}
+
+// The character looks at the mouse: the cursor position relative to the window, 20 times a second
+// (only while it moves, only while the character is shown and looking is on).
+let cursorTimer = null;
+function startCursorFeed() {
+  clearInterval(cursorTimer);
+  let last = null;
+  cursorTimer = setInterval(() => {
+    const s = settings.get();
+    if (!win || win.isDestroyed() || !s.visible || s.lookAt === false) return;
+    const p = screen.getCursorScreenPoint();
+    if (last && last.x === p.x && last.y === p.y) return;
+    last = p;
+    const b = win.getBounds();
+    win.webContents.send('cursor', { x: p.x - b.x, y: p.y - b.y });
+  }, 50);
+}
+
+// "음악에 맞춰 춤추기": the dancer window asks for the screen with system-audio loopback
+// (Windows); only the sound is used and it never leaves the renderer.
+function allowSystemAudio() {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    const fromDancer = win && !win.isDestroyed() && request.frame?.processId === win.webContents.mainFrame.processId;
+    if (!fromDancer || !settings.get().music) return callback({});
+    desktopCapturer
+      .getSources({ types: ['screen'] })
+      .then((sources) => callback(sources.length ? { video: sources[0], audio: 'loopback' } : {}))
+      .catch(() => callback({}));
+  });
 }
 
 function setVisible(v) {
@@ -374,6 +407,23 @@ function rebuildTrayMenu() {
         checked: s.fps === v,
         click: () => {
           settings.update({ fps: v });
+          win?.webContents.send('settings', settings.get());
+          rebuildTrayMenu();
+        },
+      })),
+    },
+    {
+      label: '반응',
+      submenu: [
+        { label: '마우스 쳐다보기', key: 'lookAt' },
+        { label: '클릭·쓰다듬기·들어 올리기 반응', key: 'reactions' },
+        { label: '음악에 맞춰 춤추기 (PC 소리 듣기)', key: 'music' },
+      ].map(({ label, key }) => ({
+        label,
+        type: 'checkbox',
+        checked: key === 'music' ? !!s[key] : s[key] !== false,
+        click: (item) => {
+          settings.update({ [key]: item.checked });
           win?.webContents.send('settings', settings.get());
           rebuildTrayMenu();
         },
@@ -775,6 +825,8 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => setVisible(true));
+  // The beat analysis runs an AudioContext without a click first (it never plays anything).
+  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
   // Dev self-test: DANCER_SELFTEST=out.png npm start → screenshot after a few seconds, then quit.
   if (process.env.DANCER_USER_DATA) app.setPath('userData', process.env.DANCER_USER_DATA);
@@ -795,6 +847,7 @@ if (!app.requestSingleInstanceLock()) {
     settings.load(app.getPath('userData'));
     ensureUserLibrary();
     watchLibrary();
+    allowSystemAudio();
     createWindow();
     tray = new Tray(trayIcon());
     tray.setToolTip('Desktop Dancer');

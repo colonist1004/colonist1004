@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { applyCustomization } from './customize.js';
+import { Life } from './life.js';
+import { Music } from './music.js';
+import { motionTempo, syncRate } from './beat.js';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 
 const api = window.dancer;
@@ -31,6 +34,20 @@ let vrm = null;
 let mixer = null;
 let vrmAnimation = null;
 let holdingPose = false; // the motion is a still pose: add breathing so it does not look frozen
+let action = null;
+let tempo = null; // { bpm, beatAt } of the dance, for music sync
+let timeScale = 1;
+let syncI = 0;
+const life = new Life();
+const holder = new THREE.Group(); // lifts the character for little hops (the VRM root is used by customize.js)
+scene.add(holder);
+const music = new Music((st) => {
+  if (st.error) {
+    api.reportError(st.error);
+    showMessage(st.error);
+    setTimeout(() => showMessage(''), 6000);
+  }
+});
 let viewHeight = 2;
 let loadToken = 0;
 
@@ -54,6 +71,7 @@ async function parseFile(file) {
 
 function frameCharacter() {
   if (!vrm) return;
+  holder.position.set(0, 0, 0);
   // Height from the rest pose so the camera does not jump while dancing.
   const box = new THREE.Box3().setFromObject(vrm.scene);
   const height = Math.max(0.5, box.max.y);
@@ -93,23 +111,27 @@ function disposeCharacter() {
   if (!vrm) return;
   mixer?.stopAllAction();
   mixer = null;
-  scene.remove(vrm.scene);
+  action = null;
+  life.detach();
+  holder.remove(vrm.scene);
   VRMUtils.deepDispose(vrm.scene);
   vrm = null;
 }
 
 function applyMotion() {
   if (!vrm) return;
-  for (const [n, { base, after }] of breathState) if (n.quaternion.equals(after)) n.quaternion.copy(base);
-  breathState.clear();
+  life.reset();
   mixer?.stopAllAction();
   mixer = null;
+  action = null;
+  tempo = null;
   if (!vrmAnimation) return;
   mixer = new THREE.AnimationMixer(vrm.scene);
   const clip = createVRMAnimationClip(vrmAnimation, vrm);
   holdingPose = isStill(clip);
-  mixer.clipAction(clip).setLoop(THREE.LoopRepeat, Infinity).play();
-  mixer.timeScale = settings.speed;
+  action = mixer.clipAction(clip).setLoop(THREE.LoopRepeat, Infinity).play();
+  if (!holdingPose) tempo = clipTempo(clip);
+  mixer.timeScale = timeScale = settings.speed;
 }
 
 /** True when no track of the clip changes over time (a pose made from a photo). */
@@ -121,30 +143,36 @@ function isStill(clip) {
   });
 }
 
-const _q = new THREE.Quaternion();
-const breathState = new Map();
-const _e = new THREE.Euler();
-function breathe(t) {
-  // Small enough to keep the pose, enough to look alive: chest rise, a slow head drift, weight shift.
-  const h = vrm.humanoid;
-  const add = (bone, x, y, z) => {
-    const n = h.getNormalizedBoneNode(bone);
-    if (!n) return;
-    // Bones the clip drives are reset by the mixer every frame; others still hold last frame's breath.
-    const prev = breathState.get(n);
-    if (prev && n.quaternion.equals(prev.after)) n.quaternion.copy(prev.base);
-    const base = n.quaternion.clone();
-    n.quaternion.multiply(_q.setFromEuler(_e.set(x, y, z)));
-    breathState.set(n, { base, after: n.quaternion.clone() });
+/** Beat of a dance clip from how it moves: hips going down (knee bounces) plus overall joint speed. */
+function clipTempo(clip) {
+  if (clip.duration < 1.5) return null;
+  const m = new THREE.AnimationMixer(vrm.scene);
+  const act = m.clipAction(clip).play();
+  const hips = vrm.humanoid.getNormalizedBoneNode('hips');
+  const nodes = ['leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftUpperLeg', 'rightUpperLeg', 'spine', 'head']
+    .map((b) => vrm.humanoid.getNormalizedBoneNode(b)).filter(Boolean);
+  const rate = 60;
+  const n = Math.floor(clip.duration * rate);
+  const down = new Float64Array(n), speed = new Float64Array(n);
+  let prev = null;
+  for (let i = 0; i < n; i++) {
+    m.setTime(i / rate);
+    down[i] = -hips.position.y;
+    const qs = nodes.map((x) => x.quaternion.clone());
+    if (prev) speed[i] = qs.reduce((acc, q, k) => acc + q.angleTo(prev[k]), 0);
+    prev = qs;
+  }
+  speed[0] = speed[1] || 0;
+  act.stop();
+  m.uncacheRoot(vrm.scene);
+  vrm.humanoid.resetNormalizedPose();
+  const z = (a) => {
+    const mean = a.reduce((x, y) => x + y, 0) / a.length;
+    const sd = Math.sqrt(a.reduce((x, y) => x + (y - mean) ** 2, 0) / a.length) || 1;
+    return a.map((v) => (v - mean) / sd);
   };
-  const b = Math.sin(t * 1.6);
-  add('chest', -0.025 * b, 0, 0);
-  add('upperChest', -0.015 * b, 0, 0);
-  add('neck', 0.012 * b, 0.02 * Math.sin(t * 0.37), 0);
-  add('head', 0, 0.025 * Math.sin(t * 0.29 + 1), 0.015 * Math.sin(t * 0.23));
-  add('hips', 0, 0, 0.008 * Math.sin(t * 0.5));
-  add('leftUpperArm', 0, 0, 0.02 * b);
-  add('rightUpperArm', 0, 0, -0.02 * b);
+  const zd = z(down), zs = z(speed);
+  return motionTempo(zd.map((v, i) => v + 0.5 * zs[i]), rate);
 }
 
 let currentCharacter = null;
@@ -177,11 +205,13 @@ async function load({ character, motion }) {
         proxy.name = 'lookAtQuaternionProxy';
         vrm.scene.add(proxy);
       }
-      scene.add(vrm.scene);
+      holder.add(vrm.scene);
       vrm.update(0);
       applyCustomization(vrm, await api.getCustom(character));
       currentCharacter = character;
       frameCharacter();
+      life.attach(vrm, holder, scene);
+      life.setOptions({ lookAt: settings.lookAt !== false, reactions: settings.reactions !== false });
       applyMotion();
     }
     if (!character) showMessage('캐릭터가 없습니다. 트레이 메뉴 → 캐릭터에서 VRM을 추가하세요.');
@@ -219,7 +249,12 @@ function hitTest() {
 
 window.addEventListener('mousemove', (e) => {
   pointer = { x: e.clientX, y: e.clientY };
-  if (dragging) api.drag('move', e.screenX, e.screenY);
+  if (dragging) {
+    api.drag('move', e.screenX, e.screenY);
+    life.dragMove(e.screenX, e.screenY);
+  } else if (hovering && vrm) {
+    life.hover(e.clientX, life.partAt(e.clientX, e.clientY, camera, window.innerWidth, window.innerHeight) === 'head');
+  }
 });
 window.addEventListener('mouseleave', () => {
   pointer = null;
@@ -228,9 +263,19 @@ window.addEventListener('mouseleave', () => {
 canvas.addEventListener('pointerdown', (e) => {
   if (!hovering || e.button !== 0) return;
   dragging = true;
+  press = { x: e.screenX, y: e.screenY, t: performance.now(), cx: e.clientX, cy: e.clientY, moved: false };
   canvas.setPointerCapture(e.pointerId);
   document.body.classList.add('dragging');
   api.drag('start', e.screenX, e.screenY);
+});
+// A press that barely moves is a click (a reaction); anything else is a drag (dangling legs).
+let press = null;
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging || !press || press.moved) return;
+  if (Math.hypot(e.screenX - press.x, e.screenY - press.y) > 4) {
+    press.moved = true;
+    life.dragStart(e.screenX, e.screenY);
+  }
 });
 const endDrag = (e) => {
   if (!dragging) return;
@@ -238,6 +283,11 @@ const endDrag = (e) => {
   canvas.releasePointerCapture?.(e.pointerId);
   document.body.classList.remove('dragging');
   api.drag('end', e.screenX, e.screenY);
+  if (press?.moved) life.dragEnd();
+  else if (press && e.type === 'pointerup' && performance.now() - press.t < 500 && vrm) {
+    life.click(life.partAt(press.cx, press.cy, camera, window.innerWidth, window.innerHeight));
+  }
+  press = null;
 };
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
@@ -276,6 +326,21 @@ function idlePose(t) {
   }
 }
 
+/** Normal speed, or lined up with the music's beat; nearly paused while held by the mouse. */
+function playbackSpeed(delta) {
+  let target = settings.speed;
+  if (tempo && music.active && action) {
+    const r = syncRate(tempo, action.time, music.tracker, performance.now() / 1000, settings.speed);
+    if (r) {
+      // integral part: removes a steady lag (slow frames lose time, the song's tempo is a bit off)
+      syncI = Math.max(-0.3, Math.min(0.3, syncI + r.error * delta * 0.8));
+      target = r.scale * (1 + syncI);
+    }
+  } else syncI *= 0.95;
+  timeScale += (target - timeScale) * Math.min(1, delta * 4);
+  return timeScale * (1 - 0.85 * life.holdFactor);
+}
+
 function tick() {
   requestAnimationFrame(tick);
   if (recordFrames && mixer) {
@@ -289,10 +354,21 @@ function tick() {
   acc %= step;
 
   if (vrm) {
+    const alive = freezeT == null; // frozen dev screenshots stay deterministic
+    if (alive) life.reset();
     if (mixer && freezeT != null) mixer.setTime(freezeT);
-    else if (mixer) mixer.update(delta);
-    else idlePose(clock.elapsedTime);
-    if (mixer && holdingPose && freezeT == null) breathe(clock.elapsedTime);
+    else if (mixer) {
+      mixer.timeScale = playbackSpeed(delta);
+      mixer.update(delta);
+    } else idlePose(clock.elapsedTime);
+    if (alive) {
+      const now = performance.now() / 1000;
+      life.update(delta, clock.elapsedTime, {
+        camera, width: window.innerWidth, height: window.innerHeight,
+        dancing: !!mixer && !holdingPose, still: holdingPose,
+        beat: { active: music.active, phase: music.phase(now) },
+      });
+    }
     vrm.update(delta);
   }
   renderer.render(scene, camera);
@@ -321,8 +397,30 @@ api.onCustom(({ character, custom }) => {
 });
 api.onSettings((s) => {
   settings = s;
-  if (mixer) mixer.timeScale = s.speed;
+  life.setOptions({ lookAt: s.lookAt !== false, reactions: s.reactions !== false });
+  syncMusic();
 });
+api.onCursor?.((p) => life.setCursor(p));
+
+const fakeMusic = Number(new URLSearchParams(location.search).get('fakeMusic') || 0);
+function syncMusic() {
+  if (fakeMusic) {
+    if (!music.running) music.startFake(fakeMusic);
+    return;
+  }
+  if (settings.music && !music.running) music.start();
+  else if (!settings.music && music.running) music.stop();
+}
+// dev/test hook: state of the alive layer and the beat
+window.__dancer = () => ({
+  music: { running: music.running, active: music.active, bpm: music.tracker.bpm, confidence: music.tracker.confidence },
+  tempo, timeScale, holdingPose, look: { ...life.look }, react: life.react?.kind || null, drag: life.drag.w,
+  expr: { ...life.expr },
+  head: life.headPx(camera, window.innerWidth, window.innerHeight),
+  hovering,
+});
+window.__dancerSync = () =>
+  tempo && music.active && action ? syncRate(tempo, action.time, music.tracker, performance.now() / 1000, settings.speed)?.error : null;
 
 window.addEventListener('error', (e) => api.reportError(e.message));
 window.addEventListener('unhandledrejection', (e) => api.reportError(e.reason?.stack || e.reason));
@@ -330,6 +428,7 @@ window.addEventListener('unhandledrejection', (e) => api.reportError(e.reason?.s
 (async () => {
   const init = await api.getInitial();
   settings = init.settings;
+  syncMusic();
   resize();
   tick();
   await load(init);
