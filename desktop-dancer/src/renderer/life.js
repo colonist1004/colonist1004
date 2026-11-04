@@ -13,6 +13,15 @@ const _e = new THREE.Euler();
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 
+/**
+ * VRM 0.x models face -Z in their own space; three-vrm turns the whole scene 180° (rotateVRM0), so in
+ * their normalized bones a turn about X or Z goes the other way (nodding up becomes nodding down,
+ * raising an arm lowers it). Every offset here is written for VRM 1.0 (facing +Z): flip x and z for 0.x.
+ */
+export function vrmAxisSign(vrm) {
+  return vrm?.meta?.metaVersion === '0' ? -1 : 1;
+}
+
 class Offsets {
   constructor() {
     this.map = new Map();
@@ -42,6 +51,7 @@ class Offsets {
 export class Life {
   constructor() {
     this.offsets = new Offsets();
+    this.axis = 1;
     this.vrm = null;
     this.holder = null;
     this.opts = { lookAt: true, reactions: true };
@@ -61,6 +71,7 @@ export class Life {
   }
 
   attach(vrm, holder, scene) {
+    this.axis = vrmAxisSign(vrm);
     this.offsets.map.clear();
     this.vrm = vrm;
     this.holder = holder;
@@ -185,13 +196,13 @@ export class Life {
       const n = node(b);
       if (!n || (!x && !y && !z)) return;
       this.offsets.touch(n);
-      n.quaternion.multiply(_q.setFromEuler(_e.set(x, y, z)));
+      n.quaternion.multiply(_q.setFromEuler(_e.set(this.axis * x, y, this.axis * z)));
     };
     const toward = (b, x, y, z, w) => {
       const n = node(b);
       if (!n || w <= 0) return;
       this.offsets.touch(n);
-      n.quaternion.slerp(_q2.setFromEuler(_e.set(x, y, z)), w);
+      n.quaternion.slerp(_q2.setFromEuler(_e.set(this.axis * x, y, this.axis * z)), w);
     };
     const expr = { happy: 0, surprised: 0, angry: 0, relaxed: 0, blink: 0 };
 

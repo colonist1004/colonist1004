@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { applyCustomization } from './customize.js';
-import { Life } from './life.js';
+import { Life, vrmAxisSign } from './life.js';
 import { Music } from './music.js';
 import { motionTempo, syncRate } from './beat.js';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
@@ -316,14 +316,15 @@ function recordStep() {
 function idlePose(t) {
   // Gentle breathing when no motion is loaded.
   const h = vrm.humanoid;
+  const s = vrmAxisSign(vrm); // x/z turns go the other way on VRM 0.x
   const chest = h.getNormalizedBoneNode('chest') || h.getNormalizedBoneNode('spine');
-  if (chest) chest.rotation.x = 0.03 * Math.sin(t * 2);
+  if (chest) chest.rotation.x = s * 0.03 * Math.sin(t * 2);
   for (const [bone, z] of [
     ['leftUpperArm', -1.2],
     ['rightUpperArm', 1.2],
   ]) {
     const n = h.getNormalizedBoneNode(bone);
-    if (n) n.rotation.z = z;
+    if (n) n.rotation.z = s * z;
   }
 }
 
