@@ -104,10 +104,10 @@ def test_color_field_is_queried_in_model_space():
     # the model's field: green above its own z = 0.5 (its "up" is +z), red below
     field = lambda P: np.where((P[:, 2] > 0.5)[:, None], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0])  # noqa: E731
     tex = B.bake(V2, F2, UV, lambda P, N: field(P @ R), size=256)
-    head = Vc[vmap][:, 2] > 1.0  # clearly above in model space
-    uv = UV[head]
+    head = (Vc[vmap][F2][:, :, 2] > 1.0).all(1)  # triangles clearly above in model space
+    uv = UV[F2[head]].mean(1)  # sample at triangle centers (vertices sit on UV island edges)
     px = tex[(uv[:, 1] * 255).astype(int), (uv[:, 0] * 255).astype(int)]
-    assert (px[:, 1] > px[:, 0]).mean() > 0.9
+    assert head.sum() > 10 and (px[:, 1] > px[:, 0]).mean() > 0.9, (px[:, 1] > px[:, 0]).mean()
 
 
 def test_amd_wheel_list():

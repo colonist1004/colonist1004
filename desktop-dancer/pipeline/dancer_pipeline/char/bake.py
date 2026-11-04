@@ -20,14 +20,25 @@ import numpy as np
 def cleanup(V, F, max_faces=50000, min_part=0.02):
     """Largest pieces only (floaters out), then quadric decimation to max_faces."""
     import trimesh
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
 
-    m = trimesh.Trimesh(V, F, process=True)
-    parts = m.split(only_watertight=False)
-    if len(parts) > 1:
-        total = sum(len(p.faces) for p in parts)
-        keep = [p for p in parts if len(p.faces) >= min_part * total] or [max(parts, key=lambda p: len(p.faces))]
-        m = trimesh.util.concatenate(keep)
+    m = trimesh.Trimesh(V, F, process=True)  # merges duplicate vertices so pieces are really connected
     V, F = np.asarray(m.vertices, np.float64), np.asarray(m.faces, np.int64)
+    # pieces = connected components of the vertex graph (scipy; trimesh's split would need networkx)
+    e = np.concatenate([F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]])
+    n = len(V)
+    _, label = connected_components(coo_matrix((np.ones(len(e)), (e[:, 0], e[:, 1])), shape=(n, n)), directed=False)
+    face_label = label[F[:, 0]]
+    counts = np.bincount(face_label)
+    keep = counts >= min_part * len(F)
+    if not keep.any():
+        keep[counts.argmax()] = True
+    F = F[keep[face_label]]
+    used = np.unique(F)
+    remap = np.full(n, -1, np.int64)
+    remap[used] = np.arange(len(used))
+    V, F = V[used], remap[F]
     if len(F) > max_faces:
         import fast_simplification
 
