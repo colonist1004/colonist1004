@@ -25,7 +25,8 @@ This folder is separate from the photo editor at the repo root and has its own `
   - The A-pose arm chain is conjugated by Rz(∓`--mmd-arm-angle`, default 35°).
   - When 足ＩＫ keys move, the legs are solved by two-bone IK with the knee forward; the foot takes the IK bone's rotation, tipped toward つま先ＩＫ.
   - Tests: `tests/test_vmd.py` (FK and IK round trips of the sample dance, Bezier easing, CLI).
-  - Morph and camera keys are ignored. The RTMW3D depth sign and scale are calibrated per clip in `pose_rtm.to_keypoints`.
+  - Morph and camera keys are ignored.
+- The RTMW3D depth sign and scale are calibrated per clip in `pose_rtm.to_keypoints`.
 - YouTube needs `yt-dlp[default]` and `deno`. Both are in requirements, and `video.py` points yt-dlp at the deno binary in the venv.
 - The renderer never passes raw CLI arguments. `buildArgs()` validates the option object.
 - `DANCER_PYTHON=<python>` skips the setup. `DANCER_OPEN_STUDIO=1` opens the window at launch. E2E tests drive the window with Playwright `_electron`.
