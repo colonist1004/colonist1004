@@ -18,7 +18,14 @@ This folder is separate from the photo editor at the repo root and has its own `
 
 ## Studio ("춤 만들기" window)
 - `src/studio/` is the UI. `src/pipeline-runner.js` downloads **uv** into `userData/tools`. uv installs a managed Python 3.12 (`userData/python`) and the venv `userData/pipeline-env`, with `requirements.txt` plus `requirements-nodeps.txt` (rtmlib, installed with `--no-deps`). If uv fails, it falls back to a system Python. It then runs `extract_dance.py --progress-json`. The `@@{json}` lines carry progress, done, and error events.
-- Motion engines: `rtm` (RTMW3D via ONNX Runtime; DirectML on Windows; falls back to MediaPipe), `mediapipe`, and `.bvh` input (`dancer_pipeline/bvh.py`). The RTMW3D depth sign and scale are calibrated per clip in `pose_rtm.to_keypoints`.
+- Motion engines: `rtm` (RTMW3D via ONNX Runtime; DirectML on Windows; falls back to MediaPipe), `mediapipe`, `.bvh` input (`dancer_pipeline/bvh.py`), and `.vmd` input (`dancer_pipeline/vmd.py`, through the same `run_bvh` post-processing).
+- VMD conversion:
+  - Coordinates: z mirror, quaternion (-x, -y, z, w), 1 unit = 8 cm. Keys are sampled at 30 fps with their Bezier easing.
+  - World-aligned chain: VRM hips = 下半身 and spine = 上半身 relative to it. Twist bones fold into the arm.
+  - The A-pose arm chain is conjugated by Rz(∓`--mmd-arm-angle`, default 35°).
+  - When 足ＩＫ keys move, the legs are solved by two-bone IK with the knee forward; the foot takes the IK bone's rotation, tipped toward つま先ＩＫ.
+  - Tests: `tests/test_vmd.py` (FK and IK round trips of the sample dance, Bezier easing, CLI).
+  - Morph and camera keys are ignored. The RTMW3D depth sign and scale are calibrated per clip in `pose_rtm.to_keypoints`.
 - YouTube needs `yt-dlp[default]` and `deno`. Both are in requirements, and `video.py` points yt-dlp at the deno binary in the venv.
 - The renderer never passes raw CLI arguments. `buildArgs()` validates the option object.
 - `DANCER_PYTHON=<python>` skips the setup. `DANCER_OPEN_STUDIO=1` opens the window at launch. E2E tests drive the window with Playwright `_electron`.

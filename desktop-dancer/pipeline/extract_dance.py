@@ -54,7 +54,7 @@ def mirror_rotations(local):
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="춤 영상 → VRMA 모션 (Desktop Dancer)")
-    p.add_argument("input", help="영상 파일 경로, URL(yt-dlp로 내려받음), 다른 모캡 도구의 .bvh 파일, "
+    p.add_argument("input", help="영상 파일 경로, URL(yt-dlp로 내려받음), 다른 모캡 도구의 .bvh 파일, MMD .vmd 모션, "
                                  "또는 사진(jpg/png/webp: 그 자세를 그대로 취하는 포즈를 만듦)")
     p.add_argument("--start", type=float, help="시작 시간(초)")
     p.add_argument("--end", type=float, help="끝 시간(초)")
@@ -76,6 +76,8 @@ def parse_args(argv=None):
     p.add_argument("--hands", type=float, default=0.7, help="손목 회전 반영 비율 (0~1, 기본 0.7)")
     p.add_argument("--no-foot-lock", action="store_true", help="발 고정(IK) 끄기")
     p.add_argument("--no-lift", action="store_true", help="2D+뼈 길이 보정 끄기 (MediaPipe 3D 좌표만 사용)")
+    p.add_argument("--mmd-arm-angle", type=float, default=35.0,
+                   help="VMD: MMD 모델 기본 자세에서 팔이 내려간 각도 (기본 35도, 팔이 너무 붙거나 벌어지면 조정)")
     p.add_argument("--progress-json", action="store_true", help="진행 상황을 JSON 줄로 출력 (앱용)")
     p.add_argument("--download-only", action="store_true", help="URL을 내려받기만 하고 경로를 알려줌 (앱 미리보기용)")
     p.add_argument("--save-keypoints", action="store_true", help="디버그용 키포인트 npz도 저장")
@@ -221,12 +223,20 @@ def run_video(args, video):
 
 
 def run_bvh(args, path):
-    """Motion capture file from another tool (Rokoko Vision, Plask, DeepMotion, QuickMagic, ...)."""
-    from dancer_pipeline.bvh import load_bvh
+    """Motion capture file from another tool (Rokoko Vision, Plask, DeepMotion, QuickMagic, ...),
+    or a MikuMikuDance motion (.vmd)."""
+    if str(path).lower().endswith(".vmd"):
+        from dancer_pipeline.vmd import load_vmd
 
-    progress.stage("model", 0, "BVH 읽는 중")
+        progress.stage("model", 0, "MMD 모션(VMD) 읽는 중")
+        loader = lambda p: load_vmd(p, arm_deg=args.mmd_arm_angle)  # noqa: E731
+    else:
+        from dancer_pipeline.bvh import load_bvh
+
+        progress.stage("model", 0, "BVH 읽는 중")
+        loader = load_bvh
     try:
-        fps, local, root, warnings = load_bvh(path)
+        fps, local, root, warnings = loader(path)
     except ValueError as e:
         raise SystemExit(str(e)) from None
     for w in warnings:
@@ -323,7 +333,7 @@ def _main(args):
     if args.engine != "gvhmr" and not Path(video).exists():
         raise SystemExit(f"파일이 없습니다: {video}")
 
-    if str(video).lower().endswith(".bvh"):
+    if str(video).lower().endswith((".bvh", ".vmd")):
         fps, local, root, extra = run_bvh(args, video)
     elif str(video).lower().endswith(IMAGE_EXT):
         fps, local, root, extra = run_photo(args, video)

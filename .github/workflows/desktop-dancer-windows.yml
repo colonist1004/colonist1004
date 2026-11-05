@@ -25,6 +25,8 @@ jobs:
         run: python tests/test_character.py
       - name: BVH import tests
         run: python tests/test_bvh.py
+      - name: MMD motion (VMD) import tests
+        run: python tests/test_vmd.py
       - name: RTMW3D conversion tests (depth sign/scale calibration)
         run: python tests/test_rtm.py
       - name: Local 3D generation post-processing (orientation, UV bake; no GPU, no weights)

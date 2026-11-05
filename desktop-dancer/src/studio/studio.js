@@ -186,7 +186,7 @@ function useFile(file) {
     return usePhoto(file, p);
   }
   setMode('dance');
-  if (/\.bvh$/i.test(file.name)) {
+  if (/\.(bvh|vmd)$/i.test(file.name)) {
     // Motion capture file from another tool: no video, no range, convert as is.
     video.removeAttribute('src');
     show('video-box', false);
@@ -195,7 +195,11 @@ function useFile(file) {
     state.photo = false;
     show('photo-box', false);
     state.duration = 0;
-    $('bvh-text').textContent = `BVH 모션 파일: ${file.name}`;
+    const mmd = /\.vmd$/i.test(file.name);
+    $('bvh-text').textContent = `${mmd ? 'MMD 모션(VMD)' : 'BVH 모션'} 파일: ${file.name}`;
+    $('bvh-note').textContent = mmd
+      ? 'MikuMikuDance용 춤 모션입니다. 캐릭터 뼈대에 맞게 변환합니다 (다리 IK 포함). 모션 배포처의 이용 규약을 지켜 주세요.'
+      : '다른 모션캡처 도구에서 만든 동작입니다. 영상 인식 없이 그대로 캐릭터용으로 변환합니다.';
     show('bvh-box', true);
     if (!$('name').value || $('name').dataset.auto === '1') {
       $('name').value = file.name.replace(/\.[^.]+$/, '');
