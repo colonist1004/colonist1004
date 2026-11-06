@@ -9,6 +9,7 @@ const placement = require('./placement');
 const runner = require('./pipeline-runner');
 const wander = require('./wander');
 const { writePoseVrma } = require('./vrma-writer');
+const perchMod = require('./perch');
 
 // Keep one data folder name in dev and packaged builds (the packaged app would otherwise use the
 // productName "Desktop Dancer"). The Python pipeline writes motions into this same folder.
@@ -79,7 +80,83 @@ function targetDisplay() {
 let hang = 0;
 
 function computeBounds() {
-  return placement.computeBounds(targetDisplay(), { ...settings.get(), hang });
+  return placement.computeBounds(targetDisplay(), boundsSettings());
+}
+
+/** Settings for the window bounds: the saved ones, plus the seated legs and a perch on another window. */
+function boundsSettings(extra = {}) {
+  const s = { ...settings.get(), hang, ...extra };
+  if (!perch) return s;
+  const wa = targetDisplay().workArea;
+  return { ...s, floorY: perch.floorY, yOffset: 0, xCenter: (perch.centerX - wa.x) / wa.width };
+}
+
+// ------------------------------------------------------------------ 창 위에 걸터앉기 (Windows)
+
+let perch = null; // { hwnd, floorY, centerX } (DIP) while sitting on another window
+let perchSkip = null; // the window the character was dragged off: not again until another one is in front
+let foreground = null; // last report from the watcher
+let stopPerchWatcher = null;
+
+function setupPerch() {
+  const on = settings.get().perch === true;
+  if (on && !stopPerchWatcher) {
+    if (process.env.DANCER_PERCH_FAKE) {
+      // dev/test: "x,y,w,h" (DIP) as if that window were in front
+      const [x, y, width, height] = process.env.DANCER_PERCH_FAKE.split(',').map(Number);
+      const t = setTimeout(() => onForeground({ hwnd: 1, x, y, width, height, zoomed: false, dip: true }), 1500);
+      stopPerchWatcher = () => clearTimeout(t);
+    } else stopPerchWatcher = perchMod.startWatcher(process.pid, onForeground);
+  } else if (!on && stopPerchWatcher) {
+    stopPerchWatcher();
+    stopPerchWatcher = null;
+    foreground = null;
+    updatePerch();
+  }
+}
+
+function onForeground(r) {
+  foreground = r;
+  if (perchSkip != null && r?.hwnd !== perchSkip) perchSkip = null;
+  updatePerch();
+}
+
+function updatePerch() {
+  if (!win || win.isDestroyed() || dragStart || placeWin) return;
+  const s = settings.get();
+  const d = targetDisplay();
+  let next = null;
+  const r = foreground;
+  if (s.perch === true && s.visible !== false && r && r.hwnd !== perchSkip) {
+    const rect = r.dip ? r : screen.screenToDipRect(null, { x: r.x, y: r.y, width: r.width, height: r.height });
+    if (screen.getDisplayMatching(rect).id === d.id) {
+      const scale = placement.clampScale(s.scale);
+      const centerX = perch?.hwnd === r.hwnd ? perch.centerX : d.workArea.x + placement.centerPx(d, { ...s, scale });
+      next = perchMod.perchPlacement({ ...rect, zoomed: r.zoomed }, d, placement.frameSize(scale), centerX);
+      if (next) next.hwnd = r.hwnd;
+    }
+  }
+  const same = (a, b) => (!a && !b) || (a && b && a.hwnd === b.hwnd && a.floorY === b.floorY && a.centerX === b.centerX);
+  if (same(next, perch)) return;
+  const wasOn = !!perch;
+  if (next && walk) endWalk();
+  perch = next;
+  if (wasOn !== !!perch) win.webContents.send('perch', !!perch);
+  placeWindow();
+}
+
+/** Dragged off a window: stay where it was dropped, as a normal (taskbar) position. */
+function leavePerchForDrag() {
+  if (!perch) return;
+  const d = targetDisplay();
+  const scale = placement.clampScale(settings.get().scale);
+  settings.update({
+    xCenter: placement.xCenterFor(d, perch.centerX, scale, settings.get()),
+    yOffset: placement.yOffsetFor(d, perch.floorY, scale, settings.get()),
+  });
+  perchSkip = perch.hwnd;
+  perch = null;
+  win?.webContents.send('perch', false);
 }
 
 function frameInfo(b) {
@@ -227,7 +304,7 @@ function scheduleWander() {
 
 function startWalk() {
   const s = settings.get();
-  if (!win || win.isDestroyed() || !s.visible || dragStart || walk || rendererBusy || placeWin || Date.now() < restUntil) return scheduleWander();
+  if (!win || win.isDestroyed() || !s.visible || dragStart || walk || rendererBusy || placeWin || perch || Date.now() < restUntil) return scheduleWander();
   const p = wander.plan(targetDisplay(), s);
   if (!p) return scheduleWander();
   walk = { ...p, x: p.from, started: false, last: 0 };
@@ -251,7 +328,7 @@ function stepWalk() {
   const done = walk.dir > 0 ? walk.x >= walk.to : walk.x <= walk.to;
   if (done) walk.x = walk.to;
   const d = targetDisplay();
-  const b = placement.computeBounds(d, { ...settings.get(), hang, xCenter: walk.x / d.workArea.width });
+  const b = placement.computeBounds(d, boundsSettings({ xCenter: walk.x / d.workArea.width }));
   win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
   win.webContents.send('frame', frameInfo(b));
   if (done) endWalk();
@@ -577,13 +654,15 @@ function rebuildTrayMenu() {
         { label: '가끔 작업표시줄 위를 산책하기', key: 'wander' },
         { label: '산책 뒤 가끔 걸터앉아 쉬기', key: 'restSit' },
         { label: '앉아서 춤추기 (상체만)', key: 'sitDance' },
+        ...(process.platform === 'win32' || process.env.DANCER_PERCH_FAKE ? [{ label: '앞에 있는 창 위에 걸터앉기', key: 'perch' }] : []),
       ].map(({ label, key }) => ({
         label,
         type: 'checkbox',
-        checked: key === 'music' || key === 'sitDance' ? !!s[key] : s[key] !== false,
+        checked: key === 'music' || key === 'sitDance' || key === 'perch' ? !!s[key] : s[key] !== false,
         click: (item) => {
           settings.update({ [key]: item.checked });
           win?.webContents.send('settings', settings.get());
+          if (key === 'perch') setupPerch();
           if (key === 'wander') {
             if (!item.checked && walk) endWalk();
             scheduleWander();
@@ -698,6 +777,7 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
   const d = targetDisplay();
   if (phase === 'start') {
     if (walk) endWalk();
+    leavePerchForDrag();
     dragStart = { mouseX: screenX, mouseY: screenY, ...placement.frameAnchor(d, settings.get()) };
   } else if (phase === 'move' && dragStart) {
     const scale = placement.clampScale(settings.get().scale);
@@ -710,6 +790,7 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
     win.webContents.send('frame', frameInfo(b));
   } else if (phase === 'end' && dragStart) {
     dragStart = null;
+    updatePerch();
     placeWin?.webContents.send('place:changed', placementState());
   }
 });
@@ -747,7 +828,10 @@ function openPlaceWindow() {
   placeWin.loadFile(path.join(__dirname, 'placewin', 'index.html'));
   placeWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   placeWin.webContents.on('will-navigate', (e) => e.preventDefault());
-  placeWin.on('closed', () => (placeWin = null));
+  placeWin.on('closed', () => {
+    placeWin = null;
+    updatePerch();
+  });
 }
 
 ipcMain.handle('place:get', () => placementState());
@@ -1039,6 +1123,7 @@ if (!app.requestSingleInstanceLock()) {
     allowSystemAudio();
     createWindow();
     scheduleWander();
+    setupPerch();
     tray = new Tray(trayIcon());
     tray.setToolTip('Desktop Dancer');
     tray.on('click', () => setVisible(!settings.get().visible));

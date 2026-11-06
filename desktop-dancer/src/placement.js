@@ -97,7 +97,9 @@ function computeBounds(display, settings = {}) {
   const cx = wa.x + clamp(centerPx(display, { ...settings, scale }), xr.min, xr.max);
   const off = clamp(Number.isFinite(settings.yOffset) ? settings.yOffset : 0, yr.min, yr.max);
   const left = Math.round(cx - w / 2);
-  const bottom = Math.round(floorY(display) - off);
+  // perched on another window: its top edge is the floor
+  const floor = Number.isFinite(settings.floorY) ? settings.floorY : floorY(display) - off;
+  const bottom = Math.round(floor);
   const top = bottom - h;
   // seated: the frame reaches below the floor for the hanging lower legs (in front of the taskbar,
   // or cut at its edge with behindTaskbar)
@@ -136,5 +138,5 @@ function frameAnchor(display, settings = {}) {
 
 module.exports = {
   BASE_WIDTH, BASE_HEIGHT, MIN_SCALE, MAX_SCALE, taskbarEdge, computeBounds, clampScale,
-  yOffsetRange, xRange, xCenterFor, yOffsetFor, frameAnchor, centerPx, visibleRect,
+  yOffsetRange, xRange, floorY, frameSize, xCenterFor, yOffsetFor, frameAnchor, centerPx, visibleRect,
 };

@@ -557,12 +557,17 @@ function capturePose() {
 }
 // ---------------------------------------------------------------- sitting
 
+let perched = false; // sitting on another window (main moves the window there)
+api.onPerch?.((on) => {
+  perched = on;
+});
 let restUntil = 0; // a rest on the taskbar's edge after a walk (performance.now() ms)
 api.onRestSit?.((sec) => {
   restUntil = performance.now() + sec * 1000;
 });
 function sitMode() {
   if (life.walk.on) restUntil = 0; // a new walk ends the rest
+  if (perched) return mixer && !holdingPose ? 'dance' : 'rest';
   if (performance.now() < restUntil) return 'rest';
   if (settings.sitDance && mixer && !holdingPose) return 'dance';
   return null;
