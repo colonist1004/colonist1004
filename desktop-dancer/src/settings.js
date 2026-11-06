@@ -8,7 +8,8 @@ const DEFAULTS = {
   scale: 1,
   xFraction: 1, // legacy (before xCenter): 0 = left edge, 1 = right edge
   xCenter: null, // character center as a share of the work area width (null = use xFraction)
-  yOffset: 0, // px the feet stand above the taskbar (negative: sink behind it)
+  yOffset: 0, // px the feet stand above the taskbar (negative: sink below it)
+  behindTaskbar: false, // true: what goes below the taskbar's edge is hidden behind it, not drawn over it
   displayId: null, // null = primary display
   character: null, // absolute path; null = first in library
   motion: null,

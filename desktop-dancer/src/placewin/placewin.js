@@ -20,6 +20,7 @@ function render(s) {
   if (document.activeElement !== $('y')) $('y').value = s.yOffset;
   if (document.activeElement !== $('y-num')) $('y-num').value = s.yOffset;
   $('crop-note').hidden = !s.cropped;
+  $('behind').checked = !!s.behindTaskbar;
 }
 
 const set = async (patch) => render(await api.set(patch));
@@ -41,6 +42,7 @@ $('y-num').addEventListener('change', () => {
   set({ yOffset: Number($('y-num').value) });
 });
 // Upper body only: about the lower half of the character goes below the floor.
+$('behind').addEventListener('change', () => set({ behindTaskbar: $('behind').checked }));
 $('upper').onclick = () => set({ yOffset: -Math.round(st.frameHeight * 0.42) });
 
 for (const b of document.querySelectorAll('[data-scale]')) {

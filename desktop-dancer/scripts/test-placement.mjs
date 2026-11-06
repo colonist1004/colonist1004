@@ -97,6 +97,29 @@ const tests = {
     assert.equal(s.x, -1920);
     assert.equal(feet(s), 1040);
   },
+  'behind the taskbar: the window ends at the taskbar, the frame keeps its size'() {
+    const s = { scale: 2, xCenter: 0.5, yOffset: -340 }; // half the 680 px frame below the taskbar's edge
+    const over = computeBounds(uhd, s);
+    assert.equal(over.y + over.height, 1440); // default: drawn over the taskbar down to the screen bottom
+    const behind = computeBounds(uhd, { ...s, behindTaskbar: true });
+    assert.equal(behind.y + behind.height, 1392, JSON.stringify(behind)); // cut at the taskbar's top edge
+    assert.equal(feet(behind), feet(over)); // same place, same size: only what is shown changes
+    assert.equal(behind.nominalHeight, over.nominalHeight);
+    // standing on the taskbar: nothing to hide, identical windows
+    const stand = { scale: 2, xCenter: 0.5 };
+    assert.deepEqual(computeBounds(uhd, { ...stand, behindTaskbar: true }), computeBounds(uhd, stand));
+    // sinking keeps head and shoulders above the taskbar
+    const r = yOffsetRange(uhd, 2, { behindTaskbar: true });
+    assert.equal(r.min, Math.floor(1392 - (1392 + 0.65 * 680)));
+    const deepest = computeBounds(uhd, { ...stand, yOffset: -99999, behindTaskbar: true });
+    assert.ok(Math.abs(deepest.height - 0.35 * 680) <= 1, `${deepest.height}`);
+    // 1600 %: the window fills the work area, not the taskbar
+    const big = computeBounds(uhd, { scale: 16, xCenter: 0.5, yOffset: -3000, behindTaskbar: true });
+    assert.equal(big.y + big.height, 1392);
+    // a taskbar on the left: hidden behind it on that side
+    const lb = computeBounds(left, { xCenter: -1, scale: 2, behindTaskbar: true });
+    assert.ok(lb.x >= 62, JSON.stringify(lb));
+  },
   'bad stored settings fall back sanely'() {
     const b = computeBounds(bottom, { xFraction: NaN, yOffset: NaN, scale: NaN });
     assert.deepEqual([b.x + b.width, feet(b), b.nominalHeight], [1920, 1032, BASE_HEIGHT]);

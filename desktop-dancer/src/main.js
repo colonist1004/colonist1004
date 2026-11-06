@@ -96,13 +96,15 @@ function placementState() {
   const d = targetDisplay();
   const scale = placement.clampScale(s.scale);
   const b = computeBounds();
-  const xr = placement.xRange(d, scale);
+  const xr = placement.xRange(d, scale, s);
+  const yr = placement.yOffsetRange(d, scale, s);
   return {
     scale,
     xCenterPx: Math.round(Math.min(xr.max, Math.max(xr.min, placement.centerPx(d, { ...s, scale })))),
     xRange: xr,
-    yOffset: Math.round(Math.min(placement.yOffsetRange(d, scale).max, Math.max(placement.yOffsetRange(d, scale).min, s.yOffset || 0))),
-    yRange: placement.yOffsetRange(d, scale),
+    yOffset: Math.round(Math.min(yr.max, Math.max(yr.min, s.yOffset || 0))),
+    yRange: yr,
+    behindTaskbar: !!s.behindTaskbar,
     frameHeight: b.nominalHeight,
     workWidth: d.workArea.width,
     minScale: placement.MIN_SCALE,
@@ -117,12 +119,14 @@ function updatePlacement(patch) {
   const d = targetDisplay();
   const cur = settings.get();
   const next = {};
+  if (typeof patch.behindTaskbar === 'boolean') next.behindTaskbar = patch.behindTaskbar;
+  const opts = { ...cur, ...next };
   // keep the current center when only the size changes (also converts the old xFraction setting)
   const centerNow = placement.centerPx(d, { ...cur, scale: placement.clampScale(cur.scale) });
   next.scale = Number.isFinite(patch.scale) ? placement.clampScale(patch.scale) : placement.clampScale(cur.scale);
   const cx = Number.isFinite(patch.xCenterPx) ? patch.xCenterPx : centerNow;
-  next.xCenter = placement.xCenterFor(d, d.workArea.x + cx, next.scale);
-  const yr = placement.yOffsetRange(d, next.scale);
+  next.xCenter = placement.xCenterFor(d, d.workArea.x + cx, next.scale, opts);
+  const yr = placement.yOffsetRange(d, next.scale, opts);
   const y = Number.isFinite(patch.yOffset) ? patch.yOffset : cur.yOffset || 0;
   next.yOffset = Math.round(Math.min(yr.max, Math.max(yr.min, y)));
   settings.update(next);
@@ -435,6 +439,12 @@ function rebuildTrayMenu() {
           click: () => updatePlacement({ scale: v }),
         })),
         { type: 'separator' },
+        {
+          label: '작업표시줄 뒤로 (아래로 내린 부분 가리기)',
+          type: 'checkbox',
+          checked: !!s.behindTaskbar,
+          click: (item) => updatePlacement({ behindTaskbar: item.checked }),
+        },
         { label: '위치·크기 자세히 조정…', click: openPlaceWindow },
       ],
     },
@@ -611,8 +621,8 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
   } else if (phase === 'move' && dragStart) {
     const scale = placement.clampScale(settings.get().scale);
     settings.update({
-      xCenter: placement.xCenterFor(d, dragStart.centerX + (screenX - dragStart.mouseX), scale),
-      yOffset: placement.yOffsetFor(d, dragStart.bottom + (screenY - dragStart.mouseY), scale),
+      xCenter: placement.xCenterFor(d, dragStart.centerX + (screenX - dragStart.mouseX), scale, settings.get()),
+      yOffset: placement.yOffsetFor(d, dragStart.bottom + (screenY - dragStart.mouseY), scale, settings.get()),
     });
     const b = computeBounds();
     win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });

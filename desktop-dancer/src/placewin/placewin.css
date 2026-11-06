@@ -26,3 +26,12 @@
 .spacer {
   flex: 1;
 }
+
+label.check.behind {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}

@@ -39,22 +39,31 @@ function floorY(display) {
   return wa.y + wa.height - (taskbarEdge(display) === 'hidden' ? 2 : 0);
 }
 
+/**
+ * Where the character can be seen: the whole screen, or with `behindTaskbar` the screen minus the
+ * taskbar, so the part of a big or sunk character that reaches the taskbar is hidden behind it
+ * (the window simply ends at the taskbar's edge; the taskbar is opaque, so it looks the same).
+ */
+function visibleRect(display, settings = {}) {
+  return settings.behindTaskbar ? display.workArea : display.bounds;
+}
+
 function frameSize(scale) {
   const s = clampScale(scale);
   return { w: Math.round(BASE_WIDTH * s), h: Math.round(BASE_HEIGHT * s) };
 }
 
 /** Allowed feet heights above the floor (px): down until only the head and shoulders show, up until only the feet show. */
-function yOffsetRange(display, scale = 1) {
-  const b = display.bounds;
+function yOffsetRange(display, scale = 1, settings = {}) {
+  const b = visibleRect(display, settings);
   const { h } = frameSize(scale);
   const f = floorY(display);
   return { min: Math.floor(f - (b.y + b.height + (1 - MIN_VISIBLE_TOP) * h)), max: Math.ceil(f - (b.y + MIN_VISIBLE_BOTTOM * h)) };
 }
 
 /** Allowed character centers (px from the work area's left edge): part of the body stays on screen. */
-function xRange(display, scale = 1) {
-  const b = display.bounds;
+function xRange(display, scale = 1, settings = {}) {
+  const b = visibleRect(display, settings);
   const wa = display.workArea;
   const { w } = frameSize(scale);
   return {
@@ -80,11 +89,11 @@ function centerPx(display, s) {
  */
 function computeBounds(display, settings = {}) {
   const wa = display.workArea;
-  const b = display.bounds;
+  const b = visibleRect(display, settings);
   const scale = clampScale(settings.scale ?? 1);
   const { w, h } = frameSize(scale);
-  const xr = xRange(display, scale);
-  const yr = yOffsetRange(display, scale);
+  const xr = xRange(display, scale, settings);
+  const yr = yOffsetRange(display, scale, settings);
   const cx = wa.x + clamp(centerPx(display, { ...settings, scale }), xr.min, xr.max);
   const off = clamp(Number.isFinite(settings.yOffset) ? settings.yOffset : 0, yr.min, yr.max);
   const left = Math.round(cx - w / 2);
@@ -102,15 +111,15 @@ function computeBounds(display, settings = {}) {
 }
 
 /** Frame center (screen px) -> xCenter setting, clamped. */
-function xCenterFor(display, centerX, scale = 1) {
+function xCenterFor(display, centerX, scale = 1, settings = {}) {
   const wa = display.workArea;
-  const r = xRange(display, scale);
+  const r = xRange(display, scale, settings);
   return clamp(centerX - wa.x, r.min, r.max) / wa.width;
 }
 
 /** Frame bottom (feet, screen px) -> yOffset, clamped, snapping onto the taskbar when close. */
-function yOffsetFor(display, bottom, scale = 1) {
-  const r = yOffsetRange(display, scale);
+function yOffsetFor(display, bottom, scale = 1, settings = {}) {
+  const r = yOffsetRange(display, scale, settings);
   const off = Math.round(floorY(display) - bottom);
   if (Math.abs(off) <= SNAP) return 0;
   return clamp(off, r.min, r.max);
@@ -124,5 +133,5 @@ function frameAnchor(display, settings = {}) {
 
 module.exports = {
   BASE_WIDTH, BASE_HEIGHT, MIN_SCALE, MAX_SCALE, taskbarEdge, computeBounds, clampScale,
-  yOffsetRange, xRange, xCenterFor, yOffsetFor, frameAnchor, centerPx,
+  yOffsetRange, xRange, xCenterFor, yOffsetFor, frameAnchor, centerPx, visibleRect,
 };
