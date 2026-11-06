@@ -587,6 +587,7 @@ api.onReleasePins?.(() => life.releasePins());
 
 // dev/test hook: where a humanoid bone is drawn, in window CSS px
 window.__dancerGrabAt = (x, y) => grabPartAt(x, y)?.part || null;
+window.__dancerFloorPx = () => ((camera.top - 0) / (camera.top - camera.bottom)) * window.innerHeight;
 window.__dancerBonePx = (name) => {
   const n = vrm?.humanoid.getRawBoneNode(name);
   if (!n) return null;

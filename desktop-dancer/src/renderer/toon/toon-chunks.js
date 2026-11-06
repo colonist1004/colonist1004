@@ -76,6 +76,8 @@ vec3 toonShadeColor( vec3 shade, vec3 lit ) {
   float shift = shadingShift;
   #ifdef TOON_FACE
     shift += 0.25; // faces lean to the lit side
+  #elif !defined( TOON_EYE )
+    shift += 0.15; // so does the body, a little less (it has more shape to show)
   #endif
   float s = dotNL + shift;
   float edge = fwidth( s ) + 0.02;
@@ -103,11 +105,12 @@ vec3 toonShadeColor( vec3 shade, vec3 lit ) {
   colSumToon: /* glsl */ `vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;
   #if !defined( TOON_FACE ) && !defined( TOON_EYE ) && !defined( OUTLINE )
   {
-    // the body gets more light than the face (which leans to the lit side already): a brighter
-    // shade side and a little more overall, so clothes and skin read as bright as the face
+    // the body gets more light than the face (which is nearly all on the lit side): the shade side
+    // comes up to ~85% of the lit color whatever the model's own shade color is, plus a little more
+    // overall, so clothes and skin read as bright as the face
     vec3 litCol = diffuseColor.rgb;
-    col = mix( col, max( col, litCol * 0.9 ), 0.35 * ( 1.0 - toonLit ) * uToonStrength );
-    col *= 1.0 + 0.12 * uToonStrength;
+    col = mix( col, max( col, litCol * 0.95 ), 0.7 * ( 1.0 - toonLit ) * uToonStrength );
+    col *= 1.0 + 0.1 * uToonStrength;
   }
   #endif
   #if defined( TOON_HAIR ) && !defined( OUTLINE )

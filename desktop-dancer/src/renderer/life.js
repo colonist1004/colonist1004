@@ -48,6 +48,44 @@ class Offsets {
   }
 }
 
+/**
+ * How thick the thighs are, as a share of the thigh's length: the distance of the vertices skinned
+ * mostly to an upper leg from the hip-knee line (bind pose, 75th percentile). Seated, the underside
+ * of the thigh, not the hips bone, rests on the edge (models put the hips bone at different heights).
+ */
+export function thighRadius(vrm) {
+  const h = vrm.humanoid;
+  const ul = h.getRawBoneNode('leftUpperLeg'), ll = h.getRawBoneNode('leftLowerLeg');
+  if (!ul || !ll) return 0.12;
+  const d = [];
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), p = new THREE.Vector3(), m = new THREE.Matrix4();
+  let len = 0;
+  vrm.scene.traverse((o) => {
+    if (!o.isSkinnedMesh || d.length > 20000) return;
+    const bones = o.skeleton.bones;
+    const iu = bones.indexOf(ul), il = bones.indexOf(ll);
+    if (iu < 0 || il < 0) return;
+    a.setFromMatrixPosition(m.copy(o.skeleton.boneInverses[iu]).invert());
+    b.setFromMatrixPosition(m.copy(o.skeleton.boneInverses[il]).invert());
+    const ab = b.clone().sub(a);
+    len = ab.length();
+    const pos = o.geometry.attributes.position, si = o.geometry.attributes.skinIndex, sw = o.geometry.attributes.skinWeight;
+    if (!pos || !si || !sw || len < 1e-4) return;
+    for (let i = 0; i < pos.count; i++) {
+      let best = 0, bw = -1;
+      for (let k = 0; k < 4; k++) if (sw.getComponent(i, k) > bw) (bw = sw.getComponent(i, k)), (best = si.getComponent(i, k));
+      if (best !== iu) continue;
+      p.fromBufferAttribute(pos, i).applyMatrix4(o.bindMatrix);
+      const t = clamp(p.clone().sub(a).dot(ab) / (len * len), 0, 1);
+      if (t < 0.25 || t > 0.85) continue; // the middle of the thigh, not the hip or the knee
+      d.push(a.clone().addScaledVector(ab, t).distanceTo(p) / len);
+    }
+  });
+  if (d.length < 20) return 0.12;
+  d.sort((x, y) => x - y);
+  return clamp(d[Math.floor(d.length * 0.75)], 0.05, 0.35);
+}
+
 export class Life {
   constructor() {
     this.offsets = new Offsets();
@@ -83,6 +121,7 @@ export class Life {
     const head = vrm.humanoid.getNormalizedBoneNode('head');
     this.height = head ? Math.max(0.5, head.getWorldPosition(_v).y + 0.15) : 1.6;
     this.hipsRest = vrm.humanoid.getNormalizedBoneNode('hips')?.position.clone() || null;
+    this.thighR = thighRadius(vrm);
     this.react = null;
   }
 
@@ -170,6 +209,28 @@ export class Life {
 
   start(kind, dur) {
     this.react = { kind, t0: this.t, dur };
+  }
+
+  /** Seated: move the hips up/down so the underside of the thighs rests on the floor line (world y 0). */
+  _seat(w) {
+    const h = this.vrm.humanoid;
+    const hips = h.getNormalizedBoneNode('hips');
+    const legs = ['left', 'right'].map((s) => [h.getNormalizedBoneNode(`${s}UpperLeg`), h.getNormalizedBoneNode(`${s}LowerLeg`)]);
+    if (!hips || legs.some(([u, l]) => !u || !l)) return;
+    hips.updateWorldMatrix(true, true);
+    let low = Infinity;
+    for (const [u, l] of legs) {
+      const a = u.getWorldPosition(new THREE.Vector3());
+      const b = l.getWorldPosition(new THREE.Vector3());
+      const r = this.thighR * a.distanceTo(b);
+      // lowest point of the thigh's middle part, a tube of radius r around the hip-knee line
+      const mid = a.clone().lerp(b, 0.4);
+      low = Math.min(low, mid.y - r * Math.sqrt(Math.max(0, 1 - ((b.y - a.y) / Math.max(a.distanceTo(b), 1e-6)) ** 2)));
+    }
+    if (!Number.isFinite(low)) return;
+    this.offsets.touch(hips);
+    const sy = hips.parent ? hips.parent.getWorldScale(new THREE.Vector3()).y : 1;
+    hips.position.y += (-low / (sy || 1)) * w;
   }
 
   // ------------------------------------------------ Alt+drag a hand, a foot or the chest
@@ -389,6 +450,7 @@ export class Life {
         this.offsets.touch(hips);
         hips.quaternion.slerp(_q2.identity(), 0.85 * w); // the dance's hip turns stay a little
         hips.position.y += (this.hipsRest.y * (0.09 / 0.95) - hips.position.y) * w;
+        this._seat(w);
       }
     }
     // lower legs swing while seated, also in a still pose that sits (thighs forward, hips low)
@@ -401,6 +463,7 @@ export class Life {
       const seated = thighUp > -0.55 && knee > 0.7 && hips && this.hipsRest && hips.position.y < this.hipsRest.y * 0.6;
       if (seated) {
         st.posed = st.w <= 0.3;
+        if (st.posed) this._seat(1); // a still sitting pose, too
         const amp = (0.22 + 0.08 * Math.sin(t * 0.31)) * (1 - d.w);
         for (const [side, s] of [['left', 1], ['right', -1]]) {
           // on the beat when there is music (one kick per beat, legs taking turns), lazily otherwise
