@@ -16,5 +16,8 @@ contextBridge.exposeInMainWorld('dancer', {
   onSettings: (cb) => ipcRenderer.on('settings', (_e, v) => cb(v)),
   onCursor: (cb) => ipcRenderer.on('cursor', (_e, v) => cb(v)),
   onWalk: (cb) => ipcRenderer.on('walk', (_e, v) => cb(v)),
+  onCapturePose: (cb) => ipcRenderer.on('capture-pose', () => cb()),
+  sendPose: (pose) => ipcRenderer.send('pose:captured', pose),
+  onReleasePins: (cb) => ipcRenderer.on('release-pins', () => cb()),
   setBusy: (busy) => ipcRenderer.send('busy', !!busy),
 });

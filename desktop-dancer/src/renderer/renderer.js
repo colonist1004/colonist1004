@@ -358,7 +358,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 const endDrag = (e) => {
   if (grabbing) {
-    life.grabEnd();
+    life.grabEnd(e.shiftKey); // Shift on release: the limb stays where it was put
     grabbing = null;
     dragging = false;
     canvas.releasePointerCapture?.(e.pointerId);
@@ -443,7 +443,7 @@ function tick() {
   acc %= step;
 
   if (vrm) {
-    const alive = freezeT == null || !!life.grab; // frozen dev screenshots stay deterministic
+    const alive = freezeT == null || !!life.grab || life.pins.size > 0; // frozen dev screenshots stay deterministic
     if (alive) life.reset();
     if (mixer && freezeT != null) mixer.setTime(freezeT);
     else if (mixer) {
@@ -529,8 +529,34 @@ window.__dancer = () => ({
   head: life.headPx(camera, window.innerWidth, window.innerHeight),
   hovering,
   grab: life.grab ? { part: life.grab.part, w: life.grab.w, releasing: life.grab.releasing } : null,
+  pins: [...life.pins.keys()],
   springs: springState(),
 });
+// "지금 포즈 저장": the normalized bones as they are on screen, in VRM 1.0 space (VRM 0.x mirrored back)
+function capturePose() {
+  const h = vrm.humanoid;
+  const s = vrmAxisSign(vrm);
+  const byNode = new Map();
+  for (const name of Object.keys(h.humanBones)) {
+    const n = h.getNormalizedBoneNode(name);
+    if (n) byNode.set(n, name);
+  }
+  const bones = {};
+  for (const [n, name] of byNode) {
+    let p = n.parent;
+    while (p && !byNode.has(p)) p = p.parent;
+    const t = h.normalizedRestPose[name]?.position || n.position.toArray();
+    const q = n.quaternion;
+    bones[name] = { parent: p ? byNode.get(p) : null, t: [s * t[0], t[1], s * t[2]], q: [s * q.x, q.y, s * q.z, q.w] };
+  }
+  const hp = h.getNormalizedBoneNode('hips').position;
+  return { bones, hips: [s * hp.x, hp.y, s * hp.z] };
+}
+api.onCapturePose?.(() => {
+  if (vrm) api.sendPose(capturePose());
+});
+api.onReleasePins?.(() => life.releasePins());
+
 // dev/test hook: where a humanoid bone is drawn, in window CSS px
 window.__dancerGrabAt = (x, y) => grabPartAt(x, y)?.part || null;
 window.__dancerBonePx = (name) => {

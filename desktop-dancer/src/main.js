@@ -8,6 +8,7 @@ const settings = require('./settings');
 const placement = require('./placement');
 const runner = require('./pipeline-runner');
 const wander = require('./wander');
+const { writePoseVrma } = require('./vrma-writer');
 
 // Keep one data folder name in dev and packaged builds (the packaged app would otherwise use the
 // productName "Desktop Dancer"). The Python pipeline writes motions into this same folder.
@@ -364,6 +365,30 @@ async function importFile(kind, ext, key, title) {
   rebuildTrayMenu();
 }
 
+// "지금 포즈 저장": the renderer sends the pose on screen (dance frame + limbs pulled with Alt+drag).
+function savePoseNow() {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send('capture-pose');
+}
+ipcMain.on('pose:captured', (_e, pose) => {
+  try {
+    ensureUserLibrary();
+    const dir = path.join(userLibrary(), 'motions');
+    let n = 1;
+    while (fs.existsSync(path.join(dir, `내 포즈 ${n}.pose.vrma`))) n++;
+    const file = path.join(dir, `내 포즈 ${n}.pose.vrma`);
+    fs.writeFileSync(file, writePoseVrma(pose, `내 포즈 ${n}`));
+    settings.update({ motion: file });
+    sendLoad();
+    rebuildTrayMenu();
+    if (tray) tray.displayBalloon?.({ title: 'Desktop Dancer', content: `"내 포즈 ${n}" 저장됨 (포즈 메뉴)` });
+    console.log('pose saved', file);
+  } catch (err) {
+    console.error('pose save failed', err);
+    dialog.showErrorBox('포즈 저장 실패', String(err?.message || err));
+  }
+});
+
 async function downloadSampleVrm() {
   const ok = await dialog.showMessageBox({
     type: 'info',
@@ -432,6 +457,8 @@ function rebuildTrayMenu() {
       submenu: [
         ...libraryMenu('motions', '.vrma', motion, 'motion', isPose),
         { type: 'separator' },
+        { label: '지금 포즈 저장', click: savePoseNow },
+        { label: '고정한 팔다리 풀기', click: () => win?.webContents.send('release-pins') },
         { label: '사진으로 포즈 만들기…', click: () => openStudio('pose') },
       ],
     },
@@ -1011,6 +1038,7 @@ if (!app.requestSingleInstanceLock()) {
     }, 5000);
   });
 
+  if (process.env.DANCER_SAVE_POSE) app.whenReady().then(() => setTimeout(savePoseNow, Number(process.env.DANCER_SAVE_POSE) || 3000));
   if (process.env.DANCER_OPEN_STUDIO) app.whenReady().then(() => setTimeout(() => openStudio(process.env.DANCER_OPEN_STUDIO === 'pose' ? 'pose' : 'dance'), 300));
   if (process.env.DANCER_OPEN_PLACE) app.whenReady().then(() => setTimeout(openPlaceWindow, 300));
   if (process.env.DANCER_OPEN_CHAR) app.whenReady().then(() => setTimeout(openCharStudio, 300));

@@ -65,6 +65,7 @@ export class Life {
     this.pat = { lastX: null, dir: 0, run: 0, flips: [], until: 0 };
     this.walk = { on: false, dir: 1, w: 0, yaw: 0, phase: 0 };
     this.grab = null; // Alt+drag: { part, target (world), w, releasing }
+    this.pins = new Map(); // part -> { part, target, w, releasing }: limbs left where they were put (Shift on release)
     this.drag = { on: false, w: 0, vx: 0, vy: 0, lastX: 0, lastY: 0, lastT: 0, ax: 0, swing: 0, swingV: 0 };
     this.expr = {};
     this.height = 1.6;
@@ -176,9 +177,11 @@ export class Life {
   grabStart(part, p) {
     const n = this._grabNode(part);
     if (!n) return false;
-    const at = n.getWorldPosition(new THREE.Vector3());
+    const pin = this.pins.get(part);
+    this.pins.delete(part);
+    const at = pin ? pin.target.clone() : n.getWorldPosition(new THREE.Vector3());
     // keep the offset between where it was clicked and the joint, so it does not jump
-    this.grab = { part, offset: at.sub(p), target: at.clone(), w: 0, releasing: false };
+    this.grab = { part, offset: at.clone().sub(p), target: at, w: pin ? pin.w : 0, releasing: false };
     return true;
   }
 
@@ -186,9 +189,18 @@ export class Life {
     if (this.grab && !this.grab.releasing) this.grab.target.copy(p).add(this.grab.offset);
   }
 
-  /** Let go: the limb eases back into the dance. */
-  grabEnd() {
-    if (this.grab) this.grab.releasing = true;
+  /** Let go: the limb eases back into the dance, or with `pin` stays where it was put. */
+  grabEnd(pin = false) {
+    if (!this.grab) return;
+    if (pin) {
+      this.pins.set(this.grab.part, this.grab);
+      this.grab = null;
+    } else this.grab.releasing = true;
+  }
+
+  /** Pinned limbs ease back into the dance. */
+  releasePins() {
+    for (const p of this.pins.values()) p.releasing = true;
   }
 
   get grabbing() {
@@ -410,22 +422,27 @@ export class Life {
   }
 
   _applyGrab(dt) {
-    const g = this.grab;
-    if (!g) return;
+    for (const [part, p] of this.pins) if (!this._pull(p, dt)) this.pins.delete(part);
+    if (this.grab && !this._pull(this.grab, dt)) this.grab = null;
+  }
+
+  /** One pulled limb; false once it has gone back to the dance. */
+  _pull(g, dt) {
     // quick to take hold, slow to let go (about 0.8 s, eased) so the limb drifts back into the dance
     g.w = THREE.MathUtils.clamp(g.w + (g.releasing ? -dt / 0.8 : dt / 0.15), 0, 1);
-    if (g.releasing && g.w < 0.01) {
-      this.grab = null;
-      return;
-    }
+    if (g.releasing && g.w <= 0) return false;
     const w = g.w * g.w * (3 - 2 * g.w);
     const h = this.vrm.humanoid;
     const node = (b) => h.getNormalizedBoneNode(b);
-    if (g.part === 'chest') return this._leanTo(node('spine'), node('chest') || node('upperChest'), g.target, w);
+    if (g.part === 'chest') {
+      this._leanTo(node('spine'), node('chest') || node('upperChest'), g.target, w);
+      return true;
+    }
     const side = g.part.startsWith('left') ? 'left' : 'right';
     const arm = g.part.endsWith('Hand');
     const [a, b, c] = arm ? [`${side}UpperArm`, `${side}LowerArm`, `${side}Hand`] : [`${side}UpperLeg`, `${side}LowerLeg`, `${side}Foot`];
     this._twoBone(node(a), node(b), node(c), g.target, w, arm);
+    return true;
   }
 
   /** Turn `bone` (world rotation applied) so its child direction goes from `from` to `to`, mixed by w. */
