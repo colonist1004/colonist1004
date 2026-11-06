@@ -308,8 +308,20 @@ $('btn-play-range').onclick = () => {
 
 segment('root', 'root');
 segment('model', 'model');
-const SMOOTH_LABELS = { 0: '끔', 0.25: '아주 약하게', 0.5: '약하게', 0.75: '조금 약하게', 1: '보통', 1.25: '조금 강하게', 1.5: '강하게', 1.75: '더 강하게', 2: '아주 강하게' };
-$('smooth').addEventListener('input', () => ($('smooth-label').textContent = SMOOTH_LABELS[$('smooth').value] || $('smooth').value));
+// 0..2: plain smoothing; above 2 the slow parts are smoothed harder while fast moves are kept
+function smoothLabel(v) {
+  v = Number(v);
+  if (v === 0) return '끔';
+  if (v <= 0.5) return '약하게';
+  if (v < 1) return '조금 약하게';
+  if (v === 1) return '보통';
+  if (v <= 1.5) return '조금 강하게';
+  if (v <= 2) return '강하게';
+  if (v <= 3) return '매우 부드럽게 (빠른 동작은 살림)';
+  if (v < 4) return '아주 매우 부드럽게';
+  return '최대';
+}
+$('smooth').addEventListener('input', () => ($('smooth-label').textContent = smoothLabel($('smooth').value)));
 $('name').addEventListener('input', () => ($('name').dataset.auto = '0'));
 
 $('btn-gvhmr').onclick = async () => {

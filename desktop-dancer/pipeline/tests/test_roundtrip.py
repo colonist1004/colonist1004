@@ -146,6 +146,28 @@ def _matrix_to_axis_angle(m):
     return q[..., :3] / s[..., None] * angle[..., None]
 
 
+def test_very_smooth_keeps_fast_moves():
+    """"매우 부드럽게": still parts lose their jitter, a fast arm swing keeps its size."""
+    from dancer_pipeline.rot import axis_angle_to_matrix
+
+    fps, n = 30.0, 240
+    rng = np.random.default_rng(3)
+    t = np.arange(n) / fps
+    # held pose with tracking jitter, a 1.4 rad swing up and back down over ~0.3 s at t = 4 s, held again
+    swing = 1.4 * np.exp(-0.5 * ((t - 4.0) / 0.09) ** 2)
+    angle = swing + rng.normal(0, 0.03, n)
+    local = {"leftUpperArm": axis_angle_to_matrix(np.stack([np.zeros(n), np.zeros(n), angle], 1))}
+    z = lambda L: np.arctan2(L["leftUpperArm"][:, 1, 0], L["leftUpperArm"][:, 0, 0])  # noqa: E731
+    adaptive = z(post.smooth_rotations_adaptive(local, fps, 2.0))
+    plain = z(post.smooth_rotations(local, 0.35 * 2.0 * fps))  # the same window, everywhere
+    still = (t < 3.0) | (t > 5.0)
+    jitter_in = np.std(angle[still] - swing[still])
+    jitter_out = np.std(adaptive[still] - swing[still])
+    assert jitter_out < 0.4 * jitter_in, (jitter_in, jitter_out)
+    assert adaptive.max() > 0.85 * 1.4, adaptive.max()  # the swing survives
+    assert plain.max() < 0.6 * 1.4, plain.max()  # (plain smoothing that strong would flatten it)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

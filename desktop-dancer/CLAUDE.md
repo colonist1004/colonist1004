@@ -27,6 +27,7 @@ This folder is separate from the photo editor at the repo root and has its own `
   - Tests: `tests/test_vmd.py` (FK and IK round trips of the sample dance, Bezier easing, CLI).
   - Morph and camera keys are ignored.
 - The RTMW3D depth sign and scale are calibrated per clip in `pose_rtm.to_keypoints`.
+- `--smooth` runs 0..4. Up to 2 it is plain Gaussian smoothing. The extra above 2 goes to `post.smooth_rotations_adaptive`, which measures joint speed on a lightly smoothed copy (so jitter does not count) and averages only the slow frames over a window up to ~0.7 s. Fast frames blend back to the motion as it is. Test: `test_very_smooth_keeps_fast_moves`.
 - YouTube needs `yt-dlp[default]` and `deno`. Both are in requirements, and `video.py` points yt-dlp at the deno binary in the venv.
 - The renderer never passes raw CLI arguments. `buildArgs()` validates the option object.
 - `DANCER_PYTHON=<python>` skips the setup. `DANCER_OPEN_STUDIO=1` opens the window at launch. E2E tests drive the window with Playwright `_electron`.

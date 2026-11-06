@@ -238,7 +238,7 @@ function buildArgs(o, outDir) {
   if (o.loop) args.push('--loop');
   if (o.mirror) args.push('--mirror');
   if (['planted', 'inplace', 'original'].includes(o.root)) args.push('--root', o.root);
-  if (num(o.smooth) != null) args.push('--smooth', String(Math.min(3, Math.max(0, o.smooth))));
+  if (num(o.smooth) != null) args.push('--smooth', String(Math.min(4, Math.max(0, o.smooth))));
   if (['lite', 'full', 'heavy'].includes(o.model)) args.push('--model', o.model);
   if (Number.isInteger(o.person) && o.person >= 0) args.push('--person', String(o.person));
   if (o.engine === 'gvhmr') {

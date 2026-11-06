@@ -67,7 +67,8 @@ def parse_args(argv=None):
     p.add_argument("--model", choices=["lite", "full", "heavy"], default="heavy", help="MediaPipe 모델 크기")
     p.add_argument("--person", type=int, help="여러 명일 때 대상 (첫 장면 기준 왼쪽부터 0,1,2…). 기본: 가장 큰 사람")
     p.add_argument("--fps", type=float, default=30, help="처리/출력 프레임레이트 상한 (기본 30)")
-    p.add_argument("--smooth", type=float, default=1.0, help="떨림 제거 강도 (0=끔, 1=기본, 2=강하게)")
+    p.add_argument("--smooth", type=float, default=1.0,
+                   help="떨림 제거 강도 (0=끔, 1=기본, 2=강하게, 4=최대). 2를 넘으면 느린 부분만 더 강하게 다듬고 빠른 동작은 살림")
     p.add_argument("--root", choices=["inplace", "planted", "original"], default="planted",
                    help="inplace: 제자리 고정 / planted: 디딘 발 기준으로 조금씩 이동 (기본) / original: 원본 이동 (gvhmr)")
     p.add_argument("--range", type=float, default=0.25, help="planted/original 이동 범위 제한(m, 기본 0.25)")
@@ -194,10 +195,12 @@ def run_video(args, video):
     kp = post.align_gravity(kp, min_deg=0 if engine == "mediapipe" else 12)
     if args.mirror:
         kp = mirror_keypoints(kp)
-    sigma = 1.5 * args.smooth * fps / 30
+    base = min(args.smooth, 2.0)  # beyond 2 the extra goes into the speed-adaptive pass
+    sigma = 1.5 * base * fps / 30
     kp = {k: post.gaussian_smooth(v, sigma) for k, v in kp.items()}
     local = keypoints_to_rotations(kp, hand_weight=args.hands)
-    local = post.smooth_rotations(local, 0.75 * args.smooth * fps / 30)
+    local = post.smooth_rotations(local, 0.75 * base * fps / 30)
+    local = post.smooth_rotations_adaptive(local, fps, args.smooth - 2)
     seen = post.legs_seen(legs, valid, fps)
     if args.mirror:
         seen = {"left": seen["right"], "right": seen["left"]}
@@ -249,7 +252,9 @@ def run_bvh(args, path):
         local = mirror_rotations(local)
         root = root @ MIRROR
     progress.stage("post", 0, "다듬는 중")
-    local = post.smooth_rotations(local, 0.5 * args.smooth * fps / 30)
+    base = min(args.smooth, 2.0)
+    local = post.smooth_rotations(local, 0.5 * base * fps / 30)
+    local = post.smooth_rotations_adaptive(local, fps, args.smooth - 2)
     n = len(root)
     hips_y = post.gaussian_smooth(post.ground_trajectory(local, root[:, 1]), 0.3 * args.smooth * fps / 30)
     if args.root == "original":
@@ -284,7 +289,9 @@ def run_gvhmr(args):
     if args.mirror:
         local = mirror_rotations(local)
         root = root @ MIRROR
-    local = post.smooth_rotations(local, 0.5 * args.smooth * fps / 30)
+    base = min(args.smooth, 2.0)
+    local = post.smooth_rotations(local, 0.5 * base * fps / 30)
+    local = post.smooth_rotations_adaptive(local, fps, args.smooth - 2)
     n = len(root)
     hips_y = post.gaussian_smooth(post.ground_trajectory(local, root[:, 1]), 0.5 * args.smooth * fps / 30)
     if args.root == "original":

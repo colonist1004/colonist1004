@@ -52,6 +52,36 @@ def fill_gaps(x: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return flat.reshape(x.shape)
 
 
+def smooth_rotations_adaptive(local: dict, fps: float, strength: float, fast: float = 3.0) -> dict:
+    """Extra smoothing that follows the speed (for "매우 부드럽게").
+    Slow or still parts, where tracking jitter shows the most, are smoothed hard (a window of up to
+    ~0.7 s at strength 2); fast moves (beat hits, arm swings) blend back to the motion as it is, so
+    they are not washed out. strength 0..2; `fast` = joint speed (rad/s) that counts as fully fast."""
+    if strength <= 0 or len(next(iter(local.values()))) < 3:
+        return local
+    strength = min(strength, 2.0)
+    heavy_sigma = 0.35 * strength * fps
+    out = {}
+    for b, m in local.items():
+        q = quat_continuous(matrix_to_quat(m))
+        # angular speed of the motion itself, measured on a lightly smoothed copy so that frame-to-frame
+        # jitter does not count as movement; the speed is smoothed too so the weights do not flicker
+        qs = gaussian_smooth(q, 0.1 * fps)
+        dq = np.linalg.norm(np.diff(qs, axis=0), axis=1)
+        speed = 2 * np.concatenate([dq[:1], dq]) * fps
+        speed = gaussian_smooth(speed, 0.08 * fps)
+        w = np.clip(speed / fast, 0, 1)[:, None]
+        w = w * w * (3 - 2 * w)
+        # the heavy average only uses the slow frames, so a fast move does not smear into the still
+        # parts around it
+        slow = 1 - w
+        num = gaussian_smooth(q * slow, heavy_sigma)
+        den = gaussian_smooth(slow, heavy_sigma)
+        heavy = np.where(den > 1e-3, num / np.maximum(den, 1e-3), q)
+        out[b] = quat_to_matrix(normalize((1 - w) * heavy + w * q))
+    return out
+
+
 def smooth_rotations(local: dict, sigma: float) -> dict:
     if sigma <= 0:
         return local
