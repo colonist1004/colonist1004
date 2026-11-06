@@ -266,7 +266,9 @@ function hitTest() {
 
 window.addEventListener('mousemove', (e) => {
   pointer = { x: e.clientX, y: e.clientY };
-  if (dragging) {
+  if (grabbing) {
+    // pointermove does it
+  } else if (dragging) {
     api.drag('move', e.screenX, e.screenY);
     life.dragMove(e.screenX, e.screenY);
   } else if (hovering && vrm) {
@@ -277,8 +279,67 @@ window.addEventListener('mouseleave', () => {
   pointer = null;
   if (!dragging) setHover(false);
 });
+// Alt+drag: pull a hand, a foot or the chest; letting go eases back into the dance.
+let grabbing = null; // { pointerId, z }
+const raycaster = new THREE.Raycaster();
+const GRAB_SEGS = {
+  leftHand: ['leftLowerArm', 'leftHand'], rightHand: ['rightLowerArm', 'rightHand'],
+  leftFoot: ['leftLowerLeg', 'leftFoot', 'leftToes'], rightFoot: ['rightLowerLeg', 'rightFoot', 'rightToes'],
+  chest: ['spine', 'chest', 'upperChest'],
+  // not grabbable, but they win the "nearest part" test so a click on them is not a hand/foot
+  _: ['hips', 'neck', 'head', 'leftUpperArm', 'rightUpperArm', 'leftUpperLeg', 'rightUpperLeg'],
+};
+function screenToWorld(cx, cy, z) {
+  return new THREE.Vector3(
+    camera.left + (cx / window.innerWidth) * (camera.right - camera.left),
+    camera.top - (cy / window.innerHeight) * (camera.top - camera.bottom),
+    z,
+  );
+}
+/** The grabbable part under window point (cx, cy), with the 3D point hit; null if none. */
+function grabPartAt(cx, cy) {
+  if (!vrm) return null;
+  raycaster.setFromCamera(new THREE.Vector2((cx / window.innerWidth) * 2 - 1, 1 - (cy / window.innerHeight) * 2), camera);
+  // skinned meshes cache their bounds from the first frame; a raised arm would fall outside them
+  vrm.scene.traverse((o) => o.isSkinnedMesh && o.computeBoundingSphere());
+  const hit = raycaster.intersectObject(vrm.scene, true).find((h) => h.object.isMesh && h.object.visible);
+  if (!hit) return null;
+  const p = hit.point;
+  const h = vrm.humanoid;
+  const segDist = (a, b) => {
+    const ab = b.clone().sub(a);
+    const t = THREE.MathUtils.clamp(p.clone().sub(a).dot(ab) / Math.max(ab.lengthSq(), 1e-9), 0, 1);
+    return a.clone().addScaledVector(ab, t).distanceTo(p);
+  };
+  let best = null, bestD = Infinity;
+  for (const [part, names] of Object.entries(GRAB_SEGS)) {
+    for (const n of names) {
+      const node = h.getRawBoneNode(n);
+      if (!node) continue;
+      const a = node.getWorldPosition(new THREE.Vector3());
+      const kid = node.children.find((c) => c.isBone || c.type === 'Bone' || c.type === 'Object3D');
+      // the head reaches up from its joint; children of other bones (hair, eyes) do not tell its length
+      const b = n === 'head' ? a.clone().add(new THREE.Vector3(0, 0.2, 0)) : kid ? kid.getWorldPosition(new THREE.Vector3()) : a;
+      const d = segDist(a, b);
+      if (d < bestD) (bestD = d), (best = part);
+    }
+  }
+  return best && best !== '_' ? { part: best, point: p.clone() } : null;
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   if (!hovering || e.button !== 0) return;
+  if (e.altKey && vrm) {
+    const g = grabPartAt(e.clientX, e.clientY);
+    if (g && life.grabStart(g.part, g.point)) {
+      grabbing = { pointerId: e.pointerId, z: g.point.z, part: g.part };
+      dragging = true; // keeps hover on while the cursor leaves the character
+      canvas.setPointerCapture(e.pointerId);
+      document.body.classList.add('grabbing');
+      e.preventDefault();
+      return;
+    }
+  }
   dragging = true;
   press = { x: e.screenX, y: e.screenY, t: performance.now(), cx: e.clientX, cy: e.clientY, moved: false };
   canvas.setPointerCapture(e.pointerId);
@@ -288,6 +349,7 @@ canvas.addEventListener('pointerdown', (e) => {
 // A press that barely moves is a click (a reaction); anything else is a drag (dangling legs).
 let press = null;
 canvas.addEventListener('pointermove', (e) => {
+  if (grabbing) return life.grabMove(screenToWorld(e.clientX, e.clientY, grabbing.z));
   if (!dragging || !press || press.moved) return;
   if (Math.hypot(e.screenX - press.x, e.screenY - press.y) > 4) {
     press.moved = true;
@@ -295,6 +357,14 @@ canvas.addEventListener('pointermove', (e) => {
   }
 });
 const endDrag = (e) => {
+  if (grabbing) {
+    life.grabEnd();
+    grabbing = null;
+    dragging = false;
+    canvas.releasePointerCapture?.(e.pointerId);
+    document.body.classList.remove('grabbing');
+    return;
+  }
   if (!dragging) return;
   dragging = false;
   canvas.releasePointerCapture?.(e.pointerId);
@@ -373,7 +443,7 @@ function tick() {
   acc %= step;
 
   if (vrm) {
-    const alive = freezeT == null; // frozen dev screenshots stay deterministic
+    const alive = freezeT == null || !!life.grab; // frozen dev screenshots stay deterministic
     if (alive) life.reset();
     if (mixer && freezeT != null) mixer.setTime(freezeT);
     else if (mixer) {
@@ -458,8 +528,17 @@ window.__dancer = () => ({
   expr: { ...life.expr },
   head: life.headPx(camera, window.innerWidth, window.innerHeight),
   hovering,
+  grab: life.grab ? { part: life.grab.part, w: life.grab.w, releasing: life.grab.releasing } : null,
   springs: springState(),
 });
+// dev/test hook: where a humanoid bone is drawn, in window CSS px
+window.__dancerGrabAt = (x, y) => grabPartAt(x, y)?.part || null;
+window.__dancerBonePx = (name) => {
+  const n = vrm?.humanoid.getRawBoneNode(name);
+  if (!n) return null;
+  const v = n.getWorldPosition(new THREE.Vector3()).project(camera);
+  return { x: ((v.x + 1) / 2) * window.innerWidth, y: ((1 - v.y) / 2) * window.innerHeight };
+};
 // spring bones (hair, skirt): how many joints, and how far their tips are from where they rest
 function springState() {
   const mgr = vrm?.springBoneManager;

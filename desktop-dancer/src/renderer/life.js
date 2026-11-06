@@ -64,6 +64,7 @@ export class Life {
     this.clicks = [];
     this.pat = { lastX: null, dir: 0, run: 0, flips: [], until: 0 };
     this.walk = { on: false, dir: 1, w: 0, yaw: 0, phase: 0 };
+    this.grab = null; // Alt+drag: { part, target (world), w, releasing }
     this.drag = { on: false, w: 0, vx: 0, vy: 0, lastX: 0, lastY: 0, lastT: 0, ax: 0, swing: 0, swingV: 0 };
     this.expr = {};
     this.height = 1.6;
@@ -167,6 +168,38 @@ export class Life {
 
   start(kind, dur) {
     this.react = { kind, t0: this.t, dur };
+  }
+
+  // ------------------------------------------------ Alt+drag a hand, a foot or the chest
+
+  /** Start pulling `part` ('leftHand' | 'rightHand' | 'leftFoot' | 'rightFoot' | 'chest') from world point p. */
+  grabStart(part, p) {
+    const n = this._grabNode(part);
+    if (!n) return false;
+    const at = n.getWorldPosition(new THREE.Vector3());
+    // keep the offset between where it was clicked and the joint, so it does not jump
+    this.grab = { part, offset: at.sub(p), target: at.clone(), w: 0, releasing: false };
+    return true;
+  }
+
+  grabMove(p) {
+    if (this.grab && !this.grab.releasing) this.grab.target.copy(p).add(this.grab.offset);
+  }
+
+  /** Let go: the limb eases back into the dance. */
+  grabEnd() {
+    if (this.grab) this.grab.releasing = true;
+  }
+
+  get grabbing() {
+    return !!this.grab && !this.grab.releasing;
+  }
+
+  _grabNode(part) {
+    const h = this.vrm?.humanoid;
+    if (!h) return null;
+    const bone = { leftHand: 'leftHand', rightHand: 'rightHand', leftFoot: 'leftFoot', rightFoot: 'rightFoot', chest: 'chest' }[part];
+    return h.getNormalizedBoneNode(bone) || (part === 'chest' ? h.getNormalizedBoneNode('spine') : null);
   }
 
   /** Walking along the taskbar: dir +1 = to the right of the screen. */
@@ -372,7 +405,84 @@ export class Life {
       if (em?.getExpression(name)) em.setValue(name, next);
     }
     if (this.holder) this.holder.position.y = hop * this.height;
+    this._applyGrab(dt);
     this.offsets.end();
+  }
+
+  _applyGrab(dt) {
+    const g = this.grab;
+    if (!g) return;
+    // quick to take hold, slow to let go (about 0.8 s, eased) so the limb drifts back into the dance
+    g.w = THREE.MathUtils.clamp(g.w + (g.releasing ? -dt / 0.8 : dt / 0.15), 0, 1);
+    if (g.releasing && g.w < 0.01) {
+      this.grab = null;
+      return;
+    }
+    const w = g.w * g.w * (3 - 2 * g.w);
+    const h = this.vrm.humanoid;
+    const node = (b) => h.getNormalizedBoneNode(b);
+    if (g.part === 'chest') return this._leanTo(node('spine'), node('chest') || node('upperChest'), g.target, w);
+    const side = g.part.startsWith('left') ? 'left' : 'right';
+    const arm = g.part.endsWith('Hand');
+    const [a, b, c] = arm ? [`${side}UpperArm`, `${side}LowerArm`, `${side}Hand`] : [`${side}UpperLeg`, `${side}LowerLeg`, `${side}Foot`];
+    this._twoBone(node(a), node(b), node(c), g.target, w, arm);
+  }
+
+  /** Turn `bone` (world rotation applied) so its child direction goes from `from` to `to`, mixed by w. */
+  _aim(bone, from, to, w) {
+    if (!bone || from.lengthSq() < 1e-10 || to.lengthSq() < 1e-10) return;
+    this.offsets.touch(bone);
+    bone.parent.updateWorldMatrix(true, false);
+    const pw = bone.parent.getWorldQuaternion(new THREE.Quaternion());
+    const bw = bone.getWorldQuaternion(new THREE.Quaternion());
+    const turn = new THREE.Quaternion().setFromUnitVectors(from.clone().normalize(), to.clone().normalize());
+    const want = turn.multiply(bw); // new world rotation
+    const local = pw.invert().multiply(want);
+    bone.quaternion.slerp(local, w);
+    bone.updateMatrixWorld(true);
+  }
+
+  /** Two-bone IK: root -> mid -> end reaches `target` (world), the knee/elbow bending the way it already bends. */
+  _twoBone(root, mid, end, target, w, arm) {
+    if (!root || !mid || !end) return;
+    root.updateWorldMatrix(true, true);
+    const S = root.getWorldPosition(new THREE.Vector3());
+    const E = mid.getWorldPosition(new THREE.Vector3());
+    const H = end.getWorldPosition(new THREE.Vector3());
+    const l1 = S.distanceTo(E), l2 = E.distanceTo(H);
+    const toT = target.clone().sub(S);
+    const d = THREE.MathUtils.clamp(toT.length(), Math.abs(l1 - l2) + 1e-4, l1 + l2 - 1e-4);
+    const u = toT.normalize();
+    // bend plane: where the elbow/knee points now; a straight limb bends down (arms) / forward (legs)
+    let pole = E.clone().sub(S).sub(u.clone().multiplyScalar(E.clone().sub(S).dot(u)));
+    if (pole.lengthSq() < 1e-8) pole = arm ? new THREE.Vector3(0, -1, -0.3) : new THREE.Vector3(0, 0, 1);
+    pole.sub(u.clone().multiplyScalar(pole.dot(u))).normalize();
+    const ang = Math.acos(THREE.MathUtils.clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+    const E2 = S.clone().add(u.clone().multiplyScalar(Math.cos(ang) * l1)).add(pole.multiplyScalar(Math.sin(ang) * l1));
+    const H2 = S.clone().add(u.clone().multiplyScalar(d));
+    this._aim(root, E.clone().sub(S), E2.clone().sub(S), w);
+    const E3 = mid.getWorldPosition(new THREE.Vector3());
+    const H3 = end.getWorldPosition(new THREE.Vector3());
+    this._aim(mid, H3.clone().sub(E3), H2.clone().sub(E3), w);
+  }
+
+  /** Lean the upper body toward the target: half in the spine, half in the chest, at most ~40°. */
+  _leanTo(spine, chest, target, w) {
+    if (!spine) return;
+    spine.updateWorldMatrix(true, true);
+    const base = spine.getWorldPosition(new THREE.Vector3());
+    const top = (chest || spine).getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.15 * this.height, 0));
+    const from = top.clone().sub(base);
+    let to = target.clone().sub(base);
+    const a = from.angleTo(to);
+    if (a > 0.7) to = from.clone().lerp(to.clone().setLength(from.length()), 0.7 / a);
+    const half = new THREE.Vector3().lerpVectors(from, to, 0.5);
+    this._aim(spine, from, half, w);
+    if (chest) {
+      const t2 = (chest || spine).getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.15 * this.height, 0));
+      const b2 = chest.getWorldPosition(new THREE.Vector3());
+      this._aim(chest, t2.clone().sub(b2).normalize(), to.clone().sub(half).normalize().add(half.clone().normalize()).normalize(), w);
+    }
   }
 
   /** Head center and radius in window px. */

@@ -101,6 +101,15 @@ vec3 toonShadeColor( vec3 shade, vec3 lit ) {
 
   colSum: 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;',
   colSumToon: /* glsl */ `vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;
+  #if !defined( TOON_FACE ) && !defined( TOON_EYE ) && !defined( OUTLINE )
+  {
+    // the body gets more light than the face (which leans to the lit side already): a brighter
+    // shade side and a little more overall, so clothes and skin read as bright as the face
+    vec3 litCol = diffuseColor.rgb;
+    col = mix( col, max( col, litCol * 0.9 ), 0.35 * ( 1.0 - toonLit ) * uToonStrength );
+    col *= 1.0 + 0.12 * uToonStrength;
+  }
+  #endif
   #if defined( TOON_HAIR ) && !defined( OUTLINE )
   {
     // a highlight band that slides over the hair as the head moves (the camera looks along -Z)
