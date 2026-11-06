@@ -65,6 +65,7 @@ export class Life {
     this.pat = { lastX: null, dir: 0, run: 0, flips: [], until: 0 };
     this.walk = { on: false, dir: 1, w: 0, yaw: 0, phase: 0 };
     this.grab = null; // Alt+drag: { part, target (world), w, releasing }
+    this.sit = { mode: null, w: 0, posed: false }; // mode: 'dance' (legs sit, the rest dances) | 'rest' | null
     this.pins = new Map(); // part -> { part, target, w, releasing }: limbs left where they were put (Shift on release)
     this.drag = { on: false, w: 0, vx: 0, vy: 0, lastX: 0, lastY: 0, lastT: 0, ax: 0, swing: 0, swingV: 0 };
     this.expr = {};
@@ -222,7 +223,17 @@ export class Life {
 
   /** How much the dance should pause (0..1): while held or walking. */
   get holdFactor() {
-    return Math.max(this.drag.w, this.walk.w);
+    return Math.max(this.drag.w, this.walk.w, this.sit.mode === 'rest' ? this.sit.w : 0);
+  }
+
+  /** Sit on the taskbar's edge: 'dance' keeps dancing from the hips up, 'rest' sits still; null stands. */
+  setSit(mode) {
+    this.sit.mode = mode || null;
+  }
+
+  /** Seated (by setSit, or a still pose with the thighs forward): the lower legs hang below the floor. */
+  get sitting() {
+    return this.sit.w > 0.3 || this.sit.posed;
   }
 
   // -------------------------------------------------------------- frame
@@ -353,8 +364,57 @@ export class Life {
       }
     }
 
+    // --- sitting on the edge of the taskbar (the reference pose is "걸터앉기" in scripts/poses.mjs)
+    const st = this.sit;
+    st.w += ((st.mode && !wk.on ? 1 : 0) - st.w) * Math.min(1, dt * 2.2);
+    const restW = st.mode === 'rest' ? st.w : 0;
+    if (st.w > 0.01) {
+      const w = smooth(clamp(st.w, 0, 1));
+      for (const [side, s] of [['left', 1], ['right', -1]]) {
+        toward(`${side}UpperLeg`, -1.45, 0, s * 0.06, w);
+        toward(`${side}LowerLeg`, 1.35, 0, 0, w);
+        toward(`${side}Foot`, 0.2, 0, 0, w);
+      }
+      if (restW > 0.01) {
+        const r = smooth(clamp(restW, 0, 1));
+        for (const [side, s] of [['left', 1], ['right', -1]]) {
+          toward(`${side}UpperArm`, 0.35, s * 0.2, -s * 1.2, r); // hands resting on the thighs
+          toward(`${side}LowerArm`, 0, -s * 0.7, 0, r);
+        }
+        toward('spine', 0.12, 0, 0, r);
+        toward('chest', 0, 0, 0, r);
+      }
+      const hips = node('hips');
+      if (hips && this.hipsRest) {
+        this.offsets.touch(hips);
+        hips.quaternion.slerp(_q2.identity(), 0.85 * w); // the dance's hip turns stay a little
+        hips.position.y += (this.hipsRest.y * (0.09 / 0.95) - hips.position.y) * w;
+      }
+    }
+    // lower legs swing while seated, also in a still pose that sits (thighs forward, hips low)
+    st.posed = false;
+    if (st.w > 0.5 || ctx.still) {
+      const hips = node('hips');
+      const ul = node('leftUpperLeg'), ll = node('leftLowerLeg');
+      const thighUp = ul ? _v.set(0, -1, 0).applyQuaternion(ul.quaternion).y : -1;
+      const knee = ll ? 2 * Math.acos(Math.min(1, Math.abs(ll.quaternion.w))) : 0;
+      const seated = thighUp > -0.55 && knee > 0.7 && hips && this.hipsRest && hips.position.y < this.hipsRest.y * 0.6;
+      if (seated) {
+        st.posed = st.w <= 0.3;
+        const amp = (0.22 + 0.08 * Math.sin(t * 0.31)) * (1 - d.w);
+        for (const [side, s] of [['left', 1], ['right', -1]]) {
+          // on the beat when there is music (one kick per beat, legs taking turns), lazily otherwise
+          const ph = ctx.beat?.active ? Math.PI * ctx.beat.phase + (s > 0 ? 0 : Math.PI)
+            : t * 2.5 + (s > 0 ? 0 : 2.2);
+          const k = Math.sin(ph);
+          rot(`${side}LowerLeg`, -amp * (0.5 + 0.5 * k), 0, s * 0.25 * amp * k); // a little sideways, so it reads from the front
+          rot(`${side}Foot`, 0.15 * amp * Math.sin(ph - 0.8), 0, 0);
+        }
+      }
+    }
+
     // --- breathing in a still pose / nodding to music
-    if ((ctx.still || !ctx.dancing) && wk.w < 0.5) {
+    if ((ctx.still || !ctx.dancing || restW > 0.5) && wk.w < 0.5) {
       const b = Math.sin(t * 1.6);
       rot('chest', -0.025 * b, 0, 0);
       rot('upperChest', -0.015 * b, 0, 0);

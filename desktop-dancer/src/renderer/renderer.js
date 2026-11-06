@@ -452,12 +452,14 @@ function tick() {
     } else idlePose(clock.elapsedTime);
     if (alive) {
       const now = performance.now() / 1000;
+      life.setSit(sitMode());
       life.update(delta, clock.elapsedTime, {
         camera, width: window.innerWidth, height: window.innerHeight,
         dancing: !!mixer && !holdingPose, still: holdingPose,
         beat: { active: music.active, phase: music.phase(now) },
       });
     }
+    reportSitting();
     vrm.update(delta);
     toon.update(renderer, scene, camera, sun); // after vrm.update: life.js has moved the head
   }
@@ -530,6 +532,7 @@ window.__dancer = () => ({
   hovering,
   grab: life.grab ? { part: life.grab.part, w: life.grab.w, releasing: life.grab.releasing } : null,
   pins: [...life.pins.keys()],
+  sit: { mode: life.sit.mode, w: life.sit.w, sitting: life.sitting, hang: sentHang },
   springs: springState(),
 });
 // "지금 포즈 저장": the normalized bones as they are on screen, in VRM 1.0 space (VRM 0.x mirrored back)
@@ -552,6 +555,26 @@ function capturePose() {
   const hp = h.getNormalizedBoneNode('hips').position;
   return { bones, hips: [s * hp.x, hp.y, s * hp.z] };
 }
+// ---------------------------------------------------------------- sitting
+
+let restUntil = 0; // a rest on the taskbar's edge after a walk (performance.now() ms)
+api.onRestSit?.((sec) => {
+  restUntil = performance.now() + sec * 1000;
+});
+function sitMode() {
+  if (life.walk.on) restUntil = 0; // a new walk ends the rest
+  if (performance.now() < restUntil) return 'rest';
+  if (settings.sitDance && mixer && !holdingPose) return 'dance';
+  return null;
+}
+// Seated, the hanging lower legs need the window to reach below the floor: tell main how far.
+let sentHang = 0;
+function reportSitting() {
+  const hips = vrm.humanoid.normalizedRestPose.hips?.position?.[1] || 0.9;
+  const want = life.sitting ? Math.min(0.6, (hips * 0.75) / viewHeight) : 0;
+  if (Math.abs(want - sentHang) > 0.01) api.setSitting?.((sentHang = want));
+}
+
 api.onCapturePose?.(() => {
   if (vrm) api.sendPose(capturePose());
 });

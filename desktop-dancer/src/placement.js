@@ -99,14 +99,17 @@ function computeBounds(display, settings = {}) {
   const left = Math.round(cx - w / 2);
   const bottom = Math.round(floorY(display) - off);
   const top = bottom - h;
+  // seated: the frame reaches below the floor for the hanging lower legs (in front of the taskbar,
+  // or cut at its edge with behindTaskbar)
+  const hang = Math.round(clamp(Number(settings.hang) || 0, 0, 0.6) * h);
   const x0 = Math.max(left, b.x);
   const y0 = Math.max(top, b.y);
   const x1 = Math.min(left + w, b.x + b.width);
-  const y1 = Math.min(bottom, b.y + b.height);
+  const y1 = Math.min(bottom + hang, b.y + b.height);
   return {
     x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0),
     nominalWidth: w, nominalHeight: h, cropLeft: x0 - left, cropTop: y0 - top,
-    cropped: x0 > left || y0 > top || x1 < left + w || y1 < bottom,
+    cropped: x0 > left || y0 > top || x1 < left + w || y1 < bottom + hang,
   };
 }
 

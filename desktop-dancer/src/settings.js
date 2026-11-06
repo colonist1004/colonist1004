@@ -19,6 +19,8 @@ const DEFAULTS = {
   reactions: true, // clicks, patting, dangling when dragged
   music: false, // listen to the PC's sound and dance on its beat
   wander: true, // now and then walk along the taskbar to another spot
+  restSit: true, // after a walk, now and then sit on the taskbar edge for 20-40 s
+  sitDance: false, // dance sitting down: legs from the sitting pose, the rest from the dance
   toonShader: true, // Desktop Dancer toon look (cel shading, face/hair/skin effects, toon lighting)
   toonStrength: 1, // 0..1: mix with plain MToon
   toonHairShadow: true, // hair casts a shadow on the face (an extra depth pass)

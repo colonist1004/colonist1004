@@ -75,8 +75,11 @@ function targetDisplay() {
   return screen.getAllDisplays().find((d) => d.id === s.displayId) || screen.getPrimaryDisplay();
 }
 
+// Seated, the window reaches below the floor for the hanging legs (share of the frame height; not saved).
+let hang = 0;
+
 function computeBounds() {
-  return placement.computeBounds(targetDisplay(), settings.get());
+  return placement.computeBounds(targetDisplay(), { ...settings.get(), hang });
 }
 
 function frameInfo(b) {
@@ -214,6 +217,7 @@ let walk = null;
 let walkTimer = null;
 let wanderTimer = null;
 let rendererBusy = false; // dancing to music: no walks then
+let restUntil = 0; // sitting down for a rest after a walk: no walks then
 
 function scheduleWander() {
   clearTimeout(wanderTimer);
@@ -223,7 +227,7 @@ function scheduleWander() {
 
 function startWalk() {
   const s = settings.get();
-  if (!win || win.isDestroyed() || !s.visible || dragStart || walk || rendererBusy || placeWin) return scheduleWander();
+  if (!win || win.isDestroyed() || !s.visible || dragStart || walk || rendererBusy || placeWin || Date.now() < restUntil) return scheduleWander();
   const p = wander.plan(targetDisplay(), s);
   if (!p) return scheduleWander();
   walk = { ...p, x: p.from, started: false, last: 0 };
@@ -247,7 +251,7 @@ function stepWalk() {
   const done = walk.dir > 0 ? walk.x >= walk.to : walk.x <= walk.to;
   if (done) walk.x = walk.to;
   const d = targetDisplay();
-  const b = placement.computeBounds(d, { ...settings.get(), xCenter: walk.x / d.workArea.width });
+  const b = placement.computeBounds(d, { ...settings.get(), hang, xCenter: walk.x / d.workArea.width });
   win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
   win.webContents.send('frame', frameInfo(b));
   if (done) endWalk();
@@ -260,11 +264,26 @@ function endWalk() {
   if (!walk) return;
   const d = targetDisplay();
   settings.update({ xCenter: walk.x / d.workArea.width });
+  const arrived = walk.x === walk.to;
   walk = null;
   win?.webContents.send('walk', { phase: 'stop' });
+  // after a walk, now and then sit down on the taskbar's edge for a while
+  const p = Number(process.env.DANCER_REST_SIT_PROB);
+  if (arrived && settings.get().restSit !== false && Math.random() < (Number.isFinite(p) ? p : 0.4)) {
+    const sec = 20 + Math.random() * 20;
+    restUntil = Date.now() + sec * 1000;
+    win?.webContents.send('rest-sit', sec);
+  }
   placeWin?.webContents.send('place:changed', placementState());
   scheduleWander();
 }
+
+ipcMain.on('sitting', (_e, v) => {
+  const next = Math.max(0, Math.min(0.6, Number(v) || 0));
+  if (Math.abs(next - hang) < 1e-3) return;
+  hang = next;
+  if (!walk) placeWindow();
+});
 
 ipcMain.on('busy', (_e, v) => {
   rendererBusy = !!v;
@@ -556,10 +575,12 @@ function rebuildTrayMenu() {
         { label: '클릭·쓰다듬기·들어 올리기 반응', key: 'reactions' },
         { label: '음악에 맞춰 춤추기 (PC 소리 듣기)', key: 'music' },
         { label: '가끔 작업표시줄 위를 산책하기', key: 'wander' },
+        { label: '산책 뒤 가끔 걸터앉아 쉬기', key: 'restSit' },
+        { label: '앉아서 춤추기 (상체만)', key: 'sitDance' },
       ].map(({ label, key }) => ({
         label,
         type: 'checkbox',
-        checked: key === 'music' ? !!s[key] : s[key] !== false,
+        checked: key === 'music' || key === 'sitDance' ? !!s[key] : s[key] !== false,
         click: (item) => {
           settings.update({ [key]: item.checked });
           win?.webContents.send('settings', settings.get());
