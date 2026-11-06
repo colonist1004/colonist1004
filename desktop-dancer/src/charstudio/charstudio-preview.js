@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { DEFAULTS, SLIDERS, applyCustomization, listMaterials } from '../renderer/customize.js';
+import { Toon } from '../renderer/toon/toon.js';
 
 const api = window.charStudio;
 const canvas = document.getElementById('preview');
@@ -11,7 +12,9 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true 
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(30, 4 / 3, 0.05, 50);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 1.2));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8888aa, 1.2);
+scene.add(hemi);
+const toon = new Toon(); // the same look as on the taskbar
 const sun = new THREE.DirectionalLight(0xffffff, 1.5);
 sun.position.set(1, 2, 3);
 scene.add(sun);
@@ -47,6 +50,7 @@ async function load(file) {
   const buf = await api.readLibraryFile(file);
   const gltf = await loader.parseAsync(buf, '');
   if (vrm) {
+    toon.remove();
     turntable.remove(vrm.scene);
     VRMUtils.deepDispose(vrm.scene);
   }
@@ -63,6 +67,14 @@ async function load(file) {
   turntable.add(vrm.scene);
   turntable.rotation.y = 0;
   vrm.update(0);
+  const view = (await api.getViewSettings?.()) || {};
+  const opts = { enabled: view.toonShader !== false, strength: view.toonStrength ?? 1, hairShadow: view.toonHairShadow !== false };
+  try {
+    await toon.apply(vrm, gltf, opts);
+  } catch (e) {
+    console.warn('toon: not applied', e);
+  }
+  toon.setLights(hemi, sun, toon.enabled && toon.patched.length > 0);
   currentFile = file;
   custom = { ...DEFAULTS, colors: {}, ...((await api.getCustom(file)) || {}) };
   applyCustomization(vrm, custom);
@@ -102,6 +114,7 @@ renderer.setAnimationLoop(() => {
     else turntable.rotation.y *= 0.9; // ease back to the front while dancing
     mixer?.update(dt);
     vrm.update(dt);
+    toon.update(renderer, scene, camera, sun);
   }
   renderer.render(scene, camera);
 });

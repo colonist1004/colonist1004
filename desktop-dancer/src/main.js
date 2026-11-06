@@ -391,6 +391,12 @@ async function downloadSampleVrm() {
   }
 }
 
+function setView(patch) {
+  settings.update(patch);
+  win?.webContents.send('settings', settings.get());
+  rebuildTrayMenu();
+}
+
 function rebuildTrayMenu() {
   if (!tray) return;
   const s = settings.get();
@@ -488,6 +494,33 @@ function rebuildTrayMenu() {
           rebuildTrayMenu();
         },
       })),
+    },
+    {
+      label: '보기 (툰 셰이더)',
+      submenu: [
+        {
+          label: '전용 툰 셰이더 (또렷한 그림자, 얼굴·머리카락 효과)',
+          type: 'checkbox',
+          checked: s.toonShader !== false,
+          click: (item) => setView({ toonShader: item.checked }),
+        },
+        { type: 'separator' },
+        ...[0.25, 0.5, 0.75, 1].map((v) => ({
+          label: `강도 ${Math.round(v * 100)}%`,
+          type: 'radio',
+          enabled: s.toonShader !== false,
+          checked: Math.abs((s.toonStrength ?? 1) - v) < 1e-3,
+          click: () => setView({ toonStrength: v }),
+        })),
+        { type: 'separator' },
+        {
+          label: '얼굴에 지는 머리카락 그림자',
+          type: 'checkbox',
+          enabled: s.toonShader !== false,
+          checked: s.toonHairShadow !== false,
+          click: (item) => setView({ toonHairShadow: item.checked }),
+        },
+      ],
     },
     {
       label: '반응',
@@ -849,6 +882,12 @@ ipcMain.handle('char:check-image', async (e, file) => {
   } catch (err) {
     return { type: 'error', msg: err.message };
   }
+});
+
+// The look settings the preview shares with the dancer window
+ipcMain.handle('view:get-settings', () => {
+  const s = settings.get();
+  return { toonShader: s.toonShader !== false, toonStrength: s.toonStrength ?? 1, toonHairShadow: s.toonHairShadow !== false };
 });
 
 // Picture -> 3D on this PC's graphics card (TripoSG / TripoSR)

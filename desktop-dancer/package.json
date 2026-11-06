@@ -9,7 +9,7 @@
     "gen:samples": "node scripts/make-samples.mjs",
     "predist": "node scripts/vendor.mjs",
     "dist": "electron-builder --win portable nsis --publish never",
-    "test": "node scripts/test-placement.mjs && node scripts/test-wander.mjs && node scripts/test-beat.mjs && node scripts/check-assets.mjs && node scripts/check-poses.mjs"
+    "test": "node scripts/test-placement.mjs && node scripts/check-toon.mjs && node scripts/test-wander.mjs && node scripts/test-beat.mjs && node scripts/check-assets.mjs && node scripts/check-poses.mjs"
   },
   "author": "desktop-dancer",
   "license": "UNLICENSED",

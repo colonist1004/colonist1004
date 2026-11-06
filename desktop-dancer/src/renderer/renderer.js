@@ -6,6 +6,7 @@ import { applyCustomization } from './customize.js';
 import { Life, vrmAxisSign } from './life.js';
 import { Music } from './music.js';
 import { motionTempo, syncRate } from './beat.js';
+import { Toon } from './toon/toon.js';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 
 const api = window.dancer;
@@ -20,7 +21,8 @@ const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
 camera.position.set(0, 0, 10);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 1.1));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8888aa, 1.1);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
 sun.position.set(1, 2, 3);
 scene.add(sun);
@@ -30,6 +32,8 @@ loader.register((parser) => new VRMLoaderPlugin(parser));
 loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
 let settings = { fps: 30, speed: 1 };
+const toon = new Toon(); // the Desktop Dancer toon look (patched MToon), see toon/toon.js
+const toonOptions = (s) => ({ enabled: s.toonShader !== false, strength: s.toonStrength ?? 1, hairShadow: s.toonHairShadow !== false });
 let vrm = null;
 let mixer = null;
 let vrmAnimation = null;
@@ -114,6 +118,7 @@ function disposeCharacter() {
   mixer = null;
   action = null;
   life.detach();
+  toon.remove();
   holder.remove(vrm.scene);
   VRMUtils.deepDispose(vrm.scene);
   vrm = null;
@@ -208,6 +213,13 @@ async function load({ character, motion }) {
       }
       holder.add(vrm.scene);
       vrm.update(0);
+      try {
+        const info = await toon.apply(vrm, charGltf, toonOptions(settings));
+        console.log('toon materials', JSON.stringify(info));
+      } catch (e) {
+        console.warn('toon: not applied', e); // the character still shows with plain MToon
+      }
+      toon.setLights(hemi, sun, toon.enabled && toon.patched.length > 0); // plain (non-MToon) models keep the old lights
       applyCustomization(vrm, await api.getCustom(character));
       currentCharacter = character;
       frameCharacter();
@@ -308,6 +320,7 @@ function recordStep() {
   if (recordIndex >= recordFrames) return api.devRecordDone();
   mixer.setTime(recordIndex / 30);
   vrm.update(1 / 30);
+  toon.update(renderer, scene, camera, sun);
   renderer.render(scene, camera);
   api.devFrame(recordIndex, canvas.toDataURL('image/png'));
   recordIndex++;
@@ -372,6 +385,7 @@ function tick() {
       });
     }
     vrm.update(delta);
+    toon.update(renderer, scene, camera, sun); // after vrm.update: life.js has moved the head
   }
   renderer.render(scene, camera);
   // readPixels stalls the GPU a little, so only hit-test while the cursor is over the window, ~10x/s.
@@ -398,6 +412,13 @@ api.onCustom(({ character, custom }) => {
   frameCharacter();
 });
 api.onSettings((s) => {
+  const t = toonOptions(s);
+  if (t.enabled !== toon.enabled) {
+    toon.setEnabled(t.enabled);
+    toon.setLights(hemi, sun, t.enabled && toon.patched.length > 0);
+  }
+  toon.setStrength(t.strength);
+  toon.hairShadow = t.hairShadow;
   settings = s;
   life.setOptions({ lookAt: s.lookAt !== false, reactions: s.reactions !== false });
   syncMusic();
@@ -451,6 +472,7 @@ window.addEventListener('unhandledrejection', (e) => api.reportError(e.reason?.s
 (async () => {
   const init = await api.getInitial();
   settings = init.settings;
+  toon.setLights(hemi, sun, settings.toonShader !== false);
   syncMusic();
   resize();
   tick();

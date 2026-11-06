@@ -19,6 +19,9 @@ const DEFAULTS = {
   reactions: true, // clicks, patting, dangling when dragged
   music: false, // listen to the PC's sound and dance on its beat
   wander: true, // now and then walk along the taskbar to another spot
+  toonShader: true, // Desktop Dancer toon look (cel shading, face/hair/skin effects, toon lighting)
+  toonStrength: 1, // 0..1: mix with plain MToon
+  toonHairShadow: true, // hair casts a shadow on the face (an extra depth pass)
 };
 
 let file = null;
