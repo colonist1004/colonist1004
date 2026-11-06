@@ -78,7 +78,9 @@ This folder is separate from the photo editor at the repo root and has its own `
   - `shadingShift`: the light map's G channel.
   - `col`: the hair band and the skin terminator line.
   - If an anchor is missing, the shader is left alone with a warning. `scripts/check-toon.mjs` (in `npm test`) checks the anchors against the installed three-vrm.
-- Toon lighting: hemisphere 0.6 and sun 2.1 from (2.2, 2.4, 1.4); a light from the front leaves no shade under the ortho camera. It applies only when something was patched.
+- Toon lighting: hemisphere 0.62 and sun 2.6 from (2.2, 2.4, 1.4). A light from the front leaves no shade under the ortho camera. Brightness is calibrated so a lit surface is ≈ its albedo (direct ≈ 0.82, ambient ≈ 0.18, because MToon divides by π), and the fake shade is 0.82 × lit × warm. It applies only when something was patched.
+- Plain (non-MToon) materials get an MToon stand-in in toon mode (`toMToon`, swapped back when off). The renderer re-applies customize after a swap.
+- Alpha as data: `customize.markAlphaData` flags cloth/skin materials that use alpha and have a texture that is more than 20 % half-transparent (game textures keep masks in alpha, so clothes go see-through). Custom `opaque[name]` overrides this, and the char studio material list has a 불투명 checkbox. Forcing opaque sets `transparent=false`, `alphaTest=0`, `depthWrite=true`, so the OPAQUE define gives alpha 1.
 - `giEqualizationFactor` is declared but unused in three-vrm 3.5's shader, so the old "low GI" idea does nothing. The ambient light is what flattened the shade.
 - Hair shadow: a hair-only `MeshDepthMaterial` pass into a half-res depth texture after `vrm.update` (head moved by life.js), sampled from face fragments about 2.5 cm toward the light. It runs only when a face and hair exist.
 - Kinds come from material extras `dancerToon` (read through `parser.associations`; verified that they survive the VRM plugin) or from `kindFromName`. The char studio preview applies the same toon via `view:get-settings`.

@@ -13,6 +13,7 @@
 // shadeWarm }) written by a converter, else from the material name. Everything is reversible:
 // removeToon() restores the original shader hooks and uniform values.
 import * as THREE from 'three';
+import { MToonMaterial } from '@pixiv/three-vrm';
 import { CHUNKS } from './toon-chunks.js';
 
 const KINDS = ['skin', 'face', 'hair', 'cloth', 'eye'];
@@ -22,10 +23,15 @@ const SHADE_WARM = { skin: [0.88, 0.76, 0.8], face: [0.9, 0.78, 0.8], hair: [0.8
 // Lighting presets (spec 6.1): the strong hemisphere light filled the shade with ambient light.
 // The camera looks straight at the character, so a light from almost straight ahead (1, 2, 3) leaves
 // hardly any surface in shade: the toon light comes more from the side and above.
+// Brightness is calibrated like Genshin-style renders: a lit surface shows its texture at about full
+// value (direct ~0.82 + ambient ~0.18 of the albedo; MToon divides lights by pi), a shaded one at
+// about 80-85 % with a soft tint, so shadows read clearly without the character going dark.
 const LIGHTS = {
   normal: { sky: 0xffffff, ground: 0x8888aa, hemi: 1.1, sun: 0xffffff, sunI: 1.4, pos: [1, 2, 3] },
-  toon: { sky: 0xffffff, ground: 0xc8c8d8, hemi: 0.6, sun: 0xfff4e8, sunI: 2.1, pos: [2.2, 2.4, 1.4] },
+  toon: { sky: 0xffffff, ground: 0xd8d8e6, hemi: 0.62, sun: 0xfffaf2, sunI: 2.6, pos: [2.2, 2.4, 1.4] },
 };
+const PLAIN = (m) => m && !m.isMToonMaterial && (m.isMeshStandardMaterial || m.isMeshBasicMaterial || m.isMeshLambertMaterial
+  || m.isMeshPhongMaterial || m.isMeshToonMaterial || m.isMeshPhysicalMaterial);
 
 /** Guess the kind of a material from its name (Avatar Studio writes extras instead). */
 export function kindFromName(name = '') {
@@ -82,6 +88,8 @@ export class Toon {
     this.remove();
     this.vrm = vrm;
     const parser = gltf?.parser;
+    this._collectSwaps(vrm, parser);
+    this._swap(opts.enabled !== false);
     const jobs = [];
     const seen = new Set(); // materials shared by several meshes are patched once
     this.hairMeshes = [];
@@ -141,8 +149,43 @@ export class Toon {
     this.patched.push(entry);
   }
 
+  /**
+   * Models without MToon (plain glTF materials: standard, unlit, ...) would get none of the toon look
+   * and stay flat. In toon mode they get an MToon stand-in made from the same textures and colors;
+   * the originals come back when the toon look is switched off.
+   */
+  _collectSwaps(vrm, parser) {
+    this.swaps = [];
+    const made = new Map();
+    vrm.scene.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+      list.forEach((src, slot) => {
+        if (!PLAIN(src)) return;
+        if (!made.has(src)) made.set(src, toMToon(src));
+        const mtoon = made.get(src);
+        if (parser?.associations?.has(src)) parser.associations.set(mtoon, parser.associations.get(src)); // keep extras
+        this.swaps.push({ mesh: obj, slot: Array.isArray(obj.material) ? slot : -1, orig: src, mtoon });
+      });
+    });
+  }
+
+  _swap(on) {
+    for (const { mesh, slot, orig, mtoon } of this.swaps || []) {
+      const m = on ? mtoon : orig;
+      if (slot < 0) mesh.material = m;
+      else mesh.material[slot] = m;
+    }
+  }
+
+  /** How many plain materials were given an MToon stand-in. */
+  get converted() {
+    return new Set((this.swaps || []).map((s) => s.orig)).size;
+  }
+
   setEnabled(on) {
     this.enabled = !!on;
+    this._swap(this.enabled);
     for (const { mat, kind, orig } of this.patched) {
       if (mat.parametricRimColorFactor && orig.rim) {
         mat.parametricRimColorFactor.copy(orig.rim);
@@ -159,6 +202,9 @@ export class Toon {
 
   /** Undo every patch on the current VRM. */
   remove() {
+    this._swap(false); // the model's own materials go back (and get disposed with it)
+    for (const m of new Set((this.swaps || []).map((x) => x.mtoon))) m.dispose();
+    this.swaps = [];
     for (const { mat, orig } of this.patched) {
       mat.onBeforeCompile = orig.onBeforeCompile;
       mat.customProgramCacheKey = orig.key;
@@ -265,6 +311,31 @@ export class Toon {
     this.depthTarget?.dispose();
     this.depthTarget = null;
   }
+}
+
+/** An MToon material that looks like a plain glTF one (same textures, colors, alpha and sides). */
+function toMToon(src) {
+  const color = src.color?.clone?.() || new THREE.Color(1, 1, 1);
+  const m = new MToonMaterial({
+    color,
+    map: src.map || null,
+    shadeColorFactor: color.clone(), // equal to lit on purpose: the toon shade color takes over
+    shadeMultiplyTexture: src.map || null,
+    shadingToonyFactor: 0.9,
+    shadingShiftFactor: 0,
+    normalMap: src.normalMap || null,
+    emissive: src.emissive?.clone?.() || new THREE.Color(0, 0, 0),
+    emissiveMap: src.emissiveMap || null,
+    transparent: src.transparent,
+    alphaTest: src.alphaTest,
+    side: src.side,
+    depthWrite: src.depthWrite,
+    vertexColors: src.vertexColors,
+  });
+  m.opacity = src.opacity;
+  m.name = src.name;
+  m.userData = { ...src.userData, toonStandIn: true };
+  return m;
 }
 
 function extrasOf(mat, parser) {

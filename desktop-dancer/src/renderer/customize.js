@@ -6,8 +6,61 @@
 // (uniform scale commutes with rotation) and hands/feet keep their size. Leg changes keep the feet on
 // the floor by moving the model root.
 import * as THREE from 'three';
+import { kindFromName } from './toon/toon.js';
 
-export const DEFAULTS = { height: 1, head: 1, arms: 1, legs: 1, shoulders: 1, brightness: 1, colors: {} };
+// opaque: material name -> true (draw it opaque), false (keep its transparency); unset = automatic
+export const DEFAULTS = { height: 1, head: 1, arms: 1, legs: 1, shoulders: 1, brightness: 1, colors: {}, opaque: {} };
+
+// Overlays that are meant to be see-through (never made opaque automatically)
+const OVERLAY = /blush|cheek|eyeline|lash|mastuge|matsuge|brow|mayu|shadow|highlight|tear|glass|lens|lace|veil|sheer|stocking|tights|_trans|transparent/i;
+
+/** Alpha values of a texture, sampled small: shares of half-transparent and fully transparent texels. */
+function alphaStats(tex) {
+  const img = tex?.image;
+  if (!img || !img.width || typeof document === 'undefined') return null;
+  try {
+    const n = 192;
+    const c = Object.assign(document.createElement('canvas'), { width: n, height: n });
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, n, n);
+    const d = g.getImageData(0, 0, n, n).data;
+    let mid = 0;
+    let clear = 0;
+    for (let i = 3; i < d.length; i += 4) {
+      if (d[i] > 24 && d[i] < 231) mid++;
+      else if (d[i] <= 24) clear++;
+    }
+    return { mid: mid / (n * n), clear: clear / (n * n) };
+  } catch {
+    return null; // e.g. a texture the canvas cannot read
+  }
+}
+
+/**
+ * Find materials whose texture alpha is data, not transparency. Game-style textures (Genshin and
+ * similar) keep emission/specular masks in the alpha channel; drawn as transparent (BLEND/MASK), the
+ * clothes turn see-through or get holes and arms and the body show through them. Flags cloth/skin
+ * materials whose alpha is half-transparent over a large area (real cut-outs are 0 or 1 with soft
+ * edges only). Returns the flagged names.
+ */
+export function markAlphaData(vrm) {
+  const flagged = [];
+  for (const [name, mats] of listMaterials(vrm)) {
+    for (const m of mats) {
+      if (m.userData.alphaData !== undefined) continue;
+      m.userData.alphaData = false;
+      const usesAlpha = m.transparent || m.alphaTest > 0;
+      const kind = kindFromName(name);
+      if (!usesAlpha || !m.map || OVERLAY.test(name) || !(kind === 'cloth' || kind === 'skin')) continue;
+      const st = alphaStats(m.map);
+      if (st && st.mid > 0.2) {
+        m.userData.alphaData = true;
+        flagged.push(`${name} (반투명 ${Math.round(st.mid * 100)}%)`);
+      }
+    }
+  }
+  return flagged;
+}
 
 export const SLIDERS = [
   { key: 'height', label: '키', min: 0.8, max: 1.25, step: 0.01 },
@@ -75,6 +128,19 @@ export function applyCustomization(vrm, custom) {
   }
   root.scale.copy(base.scale).multiplyScalar(c.height);
   root.position.y = base.position.y + (c.legs - 1) * legLen * c.height;
+
+  // Transparency: opaque where the user said so, or where the alpha looks like data (markAlphaData).
+  for (const [name, mats] of listMaterials(vrm)) {
+    for (const m of mats) {
+      const want = c.opaque?.[name] ?? !!m.userData.alphaData;
+      m.userData.dancerAlphaBase ??= { transparent: m.transparent, alphaTest: m.alphaTest, depthWrite: m.depthWrite };
+      const t = want ? { transparent: false, alphaTest: 0, depthWrite: true } : m.userData.dancerAlphaBase;
+      if (m.transparent !== t.transparent || m.alphaTest !== t.alphaTest || m.depthWrite !== t.depthWrite) {
+        Object.assign(m, t);
+        m.needsUpdate = true;
+      }
+    }
+  }
 
   // Colors: tint per material on top of the original color, then overall brightness.
   for (const [name, mats] of listMaterials(vrm)) {

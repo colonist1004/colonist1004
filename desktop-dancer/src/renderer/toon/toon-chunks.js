@@ -46,7 +46,7 @@ float toonHairShadow() {
 vec3 toonShadeColor( vec3 shade, vec3 lit ) {
   const vec3 L = vec3( 0.299, 0.587, 0.114 );
   float flatness = smoothstep( 0.85, 0.97, dot( shade, L ) / max( dot( lit, L ), 1e-4 ) );
-  vec3 s = mix( shade, lit * uShadeWarm * 0.72, flatness );
+  vec3 s = mix( shade, lit * uShadeWarm * 0.82, flatness );
   #if defined( TOON_SKIN ) || defined( TOON_FACE )
     s *= mix( vec3( 1.0 ), uShadeWarm, 0.35 );
   #endif
@@ -106,7 +106,7 @@ vec3 toonShadeColor( vec3 shade, vec3 lit ) {
     // a highlight band that slides over the hair as the head moves (the camera looks along -Z)
     float nv = normal.z;
     float band = smoothstep( 0.82, 0.86, nv ) * ( 1.0 - smoothstep( 0.92, 0.96, nv ) );
-    col += diffuseColor.rgb * band * 0.35 * toonLit * uToonStrength;
+    col += diffuseColor.rgb * band * 0.22 * toonLit * uToonStrength;
   }
   #endif
   #if ( defined( TOON_SKIN ) || defined( TOON_FACE ) ) && !defined( OUTLINE )

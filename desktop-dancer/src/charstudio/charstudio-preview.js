@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
-import { DEFAULTS, SLIDERS, applyCustomization, listMaterials } from '../renderer/customize.js';
+import { DEFAULTS, SLIDERS, applyCustomization, listMaterials, markAlphaData } from '../renderer/customize.js';
 import { Toon } from '../renderer/toon/toon.js';
 
 const api = window.charStudio;
@@ -76,7 +76,9 @@ async function load(file) {
   }
   toon.setLights(hemi, sun, toon.enabled && toon.patched.length > 0);
   currentFile = file;
-  custom = { ...DEFAULTS, colors: {}, ...((await api.getCustom(file)) || {}) };
+  custom = { ...DEFAULTS, colors: {}, opaque: {}, ...((await api.getCustom(file)) || {}) };
+  custom.opaque ??= {};
+  markAlphaData(vrm);
   applyCustomization(vrm, custom);
   buildTweakUI();
   const box = new THREE.Box3().setFromObject(vrm.scene);
@@ -143,7 +145,7 @@ function buildTweakUI() {
   }
   const colors = document.getElementById('colors');
   colors.innerHTML = '';
-  for (const name of [...listMaterials(vrm).keys()].slice(0, 40)) {
+  for (const [name, mats] of [...listMaterials(vrm)].slice(0, 40)) {
     const label = document.createElement('label');
     label.title = name;
     const input = Object.assign(document.createElement('input'), { type: 'color', value: custom.colors[name] || '#ffffff' });
@@ -152,12 +154,25 @@ function buildTweakUI() {
       applyCustomization(vrm, custom);
     });
     label.append(input, document.createTextNode(name));
+    // see-through materials: a switch to draw them opaque (pre-set when the alpha looks like data)
+    const base = mats[0].userData.dancerAlphaBase;
+    if (base && (base.transparent || base.alphaTest > 0)) {
+      const auto = !!mats[0].userData.alphaData;
+      const op = Object.assign(document.createElement('input'), { type: 'checkbox', className: 'opaque', checked: custom.opaque[name] ?? auto });
+      op.title = auto ? '텍스처 알파가 투명도가 아닌 데이터로 보여 자동으로 불투명 처리했어요' : '이 재질을 불투명하게 그리기';
+      op.addEventListener('change', () => {
+        custom.opaque[name] = op.checked;
+        applyCustomization(vrm, custom);
+      });
+      const tag = Object.assign(document.createElement('span'), { className: 'opaque-tag', textContent: auto ? '불투명(자동)' : '불투명' });
+      label.append(op, tag);
+    }
     colors.appendChild(label);
   }
 }
 
 function resetCustom() {
-  custom = { ...DEFAULTS, colors: {} };
+  custom = { ...DEFAULTS, colors: {}, opaque: {} };
   if (vrm) applyCustomization(vrm, custom);
   buildTweakUI();
 }

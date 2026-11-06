@@ -152,3 +152,6 @@
 .mb10 {
   margin-bottom: 10px;
 }
+
+#colors input.opaque { margin-left: 6px; }
+#colors .opaque-tag { font-size: 11px; color: var(--muted, #888); }

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-import { applyCustomization } from './customize.js';
+import { applyCustomization, markAlphaData } from './customize.js';
 import { Life, vrmAxisSign } from './life.js';
 import { Music } from './music.js';
 import { motionTempo, syncRate } from './beat.js';
@@ -33,6 +33,7 @@ loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
 let settings = { fps: 30, speed: 1 };
 const toon = new Toon(); // the Desktop Dancer toon look (patched MToon), see toon/toon.js
+let lastCustom = null; // the character's tweaks, re-applied when the toon look swaps materials
 const toonOptions = (s) => ({ enabled: s.toonShader !== false, strength: s.toonStrength ?? 1, hairShadow: s.toonHairShadow !== false });
 let vrm = null;
 let mixer = null;
@@ -220,7 +221,10 @@ async function load({ character, motion }) {
         console.warn('toon: not applied', e); // the character still shows with plain MToon
       }
       toon.setLights(hemi, sun, toon.enabled && toon.patched.length > 0); // plain (non-MToon) models keep the old lights
-      applyCustomization(vrm, await api.getCustom(character));
+      const flagged = markAlphaData(vrm);
+      if (flagged.length) console.log('opaque (alpha looks like data):', flagged.join(', '));
+      lastCustom = await api.getCustom(character);
+      applyCustomization(vrm, lastCustom);
       currentCharacter = character;
       frameCharacter();
       life.attach(vrm, holder, scene);
@@ -408,6 +412,7 @@ window.addEventListener('wheel', (e) => {
 }, { passive: false });
 api.onCustom(({ character, custom }) => {
   if (!vrm || character !== currentCharacter) return;
+  lastCustom = custom;
   applyCustomization(vrm, custom);
   frameCharacter();
 });
@@ -416,6 +421,10 @@ api.onSettings((s) => {
   if (t.enabled !== toon.enabled) {
     toon.setEnabled(t.enabled);
     toon.setLights(hemi, sun, t.enabled && toon.patched.length > 0);
+    if (vrm) {
+      markAlphaData(vrm); // stand-in materials (plain models) are new objects
+      applyCustomization(vrm, lastCustom);
+    }
   }
   toon.setStrength(t.strength);
   toon.hairShadow = t.hairShadow;
