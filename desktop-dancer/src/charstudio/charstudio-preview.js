@@ -68,7 +68,7 @@ async function load(file) {
   turntable.rotation.y = 0;
   vrm.update(0);
   const view = (await api.getViewSettings?.()) || {};
-  const opts = { enabled: view.toonShader !== false, strength: view.toonStrength ?? 1, hairShadow: view.toonHairShadow !== false };
+  const opts = { enabled: view.toonShader !== false, strength: view.toonStrength ?? 1, hairShadow: view.toonHairShadow !== false, light: view.light };
   try {
     await toon.apply(vrm, gltf, opts);
   } catch (e) {

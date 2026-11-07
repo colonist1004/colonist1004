@@ -1,0 +1,19 @@
+.lslider {
+  display: block;
+  margin: 8px 0 14px;
+}
+.lslider .lbl {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.lslider .lbl b {
+  font-variant-numeric: tabular-nums;
+}
+.lslider .ctl input[type='range'] {
+  width: 100%;
+}
+.warn {
+  color: #b5541a;
+}

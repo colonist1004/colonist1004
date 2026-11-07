@@ -30,6 +30,20 @@ const LIGHTS = {
   normal: { sky: 0xffffff, ground: 0x8888aa, hemi: 1.1, sun: 0xffffff, sunI: 1.4, pos: [1, 2, 3] },
   toon: { sky: 0xffffff, ground: 0xd8d8e6, hemi: 0.62, sun: 0xfffaf2, sunI: 2.6, pos: [2.2, 2.4, 1.4] },
 };
+/** 조명 설정 defaults (same as settings.js DEFAULTS.light). */
+export const LIGHT_DEFAULTS = { face: 1, hair: 1, body: 1, shade: 0.7, sun: 1, ambient: 1, dirX: 0.65, dirY: 0.6 };
+const LIGHT_RANGE = { face: [0.4, 1.6], hair: [0.4, 1.6], body: [0.4, 2], shade: [0, 1], sun: [0.3, 2], ambient: [0, 2.5], dirX: [-1, 1], dirY: [0, 1] };
+
+/** Light settings, every value present and in range. */
+export function cleanLight(l = {}) {
+  const out = {};
+  for (const [k, [lo, hi]] of Object.entries(LIGHT_RANGE)) {
+    const v = Number(l?.[k]);
+    out[k] = Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : LIGHT_DEFAULTS[k];
+  }
+  return out;
+}
+
 const PLAIN = (m) => m && !m.isMToonMaterial && (m.isMeshStandardMaterial || m.isMeshBasicMaterial || m.isMeshLambertMaterial
   || m.isMeshPhongMaterial || m.isMeshToonMaterial || m.isMeshPhysicalMaterial);
 
@@ -47,6 +61,10 @@ export class Toon {
   constructor() {
     this.uniforms = {
       uToonStrength: { value: 1 },
+      uFaceGain: { value: 1 },
+      uHairGain: { value: 1 },
+      uBodyGain: { value: 1 },
+      uShadeLift: { value: 0.7 },
       uHeadForward: { value: new THREE.Vector3(0, 0, 1) },
       uHeadRight: { value: new THREE.Vector3(1, 0, 0) },
       uHeadUp: { value: new THREE.Vector3(0, 1, 0) },
@@ -61,6 +79,7 @@ export class Toon {
     this.patched = [];
     this.enabled = false;
     this.hairShadow = true;
+    this.light = { ...LIGHT_DEFAULTS };
     this.hairMeshes = [];
     this.depthTarget = null;
     this.depthMaterial = new THREE.MeshDepthMaterial();
@@ -72,12 +91,26 @@ export class Toon {
   /** Lights to the toon preset (or back). */
   setLights(hemi, sun, on) {
     const p = on ? LIGHTS.toon : LIGHTS.normal;
+    const l = this.light;
     hemi.color.set(p.sky);
     hemi.groundColor.set(p.ground);
-    hemi.intensity = p.hemi;
+    hemi.intensity = p.hemi * l.ambient;
     sun.color.set(p.sun);
-    sun.intensity = p.sunI;
-    sun.position.set(...p.pos);
+    sun.intensity = p.sunI * l.sun;
+    // direction: dirX -1 (from the left of the screen) .. 1 (right), dirY 0 (level) .. 1 (from above)
+    if (on) sun.position.set(l.dirX * 3.4, l.dirY * 4, 1.4);
+    else sun.position.set(...p.pos);
+    this._lights = [hemi, sun, on];
+  }
+
+  /** 조명 설정: { face, hair, body, shade, sun, ambient, dirX, dirY } (missing keys = defaults). */
+  setLight(l) {
+    this.light = cleanLight(l);
+    this.uniforms.uFaceGain.value = this.light.face;
+    this.uniforms.uHairGain.value = this.light.hair;
+    this.uniforms.uBodyGain.value = this.light.body;
+    this.uniforms.uShadeLift.value = this.light.shade;
+    if (this._lights) this.setLights(...this._lights);
   }
 
   /**
@@ -106,6 +139,7 @@ export class Toon {
     });
     await Promise.all(jobs);
     this.setStrength(opts.strength ?? 1);
+    if (opts.light) this.setLight(opts.light);
     this.hairShadow = opts.hairShadow !== false;
     this.setEnabled(opts.enabled !== false);
     return this.patched.map((p) => ({ name: p.mat.name, kind: p.kind, lightmap: !!p.lightmap }));

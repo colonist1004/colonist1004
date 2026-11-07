@@ -6,6 +6,10 @@ export const CHUNKS = {
   uniforms: /* glsl */ `
 // ---- Desktop Dancer toon ----
 uniform float uToonStrength;
+uniform float uFaceGain;
+uniform float uHairGain;
+uniform float uBodyGain;
+uniform float uShadeLift;
 uniform vec3 uHeadCenter;
 uniform float uHeadRadius;
 uniform vec3 uShadeWarm;
@@ -109,9 +113,19 @@ vec3 toonShadeColor( vec3 shade, vec3 lit ) {
     // comes up to ~85% of the lit color whatever the model's own shade color is, plus a little more
     // overall, so clothes and skin read as bright as the face
     vec3 litCol = diffuseColor.rgb;
-    col = mix( col, max( col, litCol * 0.95 ), 0.7 * ( 1.0 - toonLit ) * uToonStrength );
+    col = mix( col, max( col, litCol * 0.95 ), uShadeLift * ( 1.0 - toonLit ) * uToonStrength );
     col *= 1.0 + 0.1 * uToonStrength;
   }
+  #endif
+  // 조명 설정: brightness per part
+  #if !defined( OUTLINE )
+    #if defined( TOON_FACE ) || defined( TOON_EYE )
+      col *= uFaceGain;
+    #elif defined( TOON_HAIR )
+      col *= uHairGain;
+    #else
+      col *= uBodyGain;
+    #endif
   #endif
   #if defined( TOON_HAIR ) && !defined( OUTLINE )
   {

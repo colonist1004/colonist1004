@@ -20,6 +20,8 @@ const DEFAULTS = {
   music: false, // listen to the PC's sound and dance on its beat
   wander: true, // now and then walk along the taskbar to another spot
   restSit: true, // after a walk, now and then sit on the taskbar edge for 20-40 s
+  // 조명 설정 (toon look): brightness per part, how light the shade side is, the light itself
+  light: { face: 1, hair: 1, body: 1, shade: 0.7, sun: 1, ambient: 1, dirX: 0.65, dirY: 0.6 },
   perch: false, // Windows: sit on the top edge of the window in front
   sitDance: false, // dance sitting down: legs from the sitting pose, the rest from the dance
   toonShader: true, // Desktop Dancer toon look (cel shading, face/hair/skin effects, toon lighting)

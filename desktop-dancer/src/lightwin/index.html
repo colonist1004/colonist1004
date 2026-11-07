@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <title>조명 설정 — Desktop Dancer</title>
+    <link rel="stylesheet" href="../studio/studio.css" />
+    <link rel="stylesheet" href="../placewin/placewin.css" />
+    <link rel="stylesheet" href="lightwin.css" />
+  </head>
+  <body>
+    <header>
+      <h1>조명 설정</h1>
+      <p class="sub">움직이는 즉시 캐릭터에 적용됩니다. 얼굴과 몸의 밝기가 다르게 느껴지면 <b>몸 밝기</b>와 <b>그림자 밝기</b>부터 올려 보세요.</p>
+      <p id="toon-off" class="hint warn" hidden>툰 셰이더가 꺼져 있어 부위별 밝기·그림자 밝기는 적용되지 않습니다 (트레이 → 보기).</p>
+    </header>
+
+    <section class="card">
+      <h2>부위별 밝기</h2>
+      <div class="lslider" data-key="face" data-label="얼굴 (눈 포함)" data-min="40" data-max="160"></div>
+      <div class="lslider" data-key="body" data-label="몸 (피부·옷)" data-min="40" data-max="200"></div>
+      <div class="lslider" data-key="hair" data-label="머리카락" data-min="40" data-max="160"></div>
+    </section>
+
+    <section class="card">
+      <h2>그림자</h2>
+      <div class="lslider" data-key="shade" data-label="몸 그림자 밝기" data-min="0" data-max="100"></div>
+      <p class="hint">100%면 그림자가 거의 밝은 면만큼 밝아집니다 (얼굴처럼 평평한 느낌). 0%면 모델 원래 그림자 색 그대로.</p>
+    </section>
+
+    <section class="card">
+      <h2>빛</h2>
+      <div class="lslider" data-key="sun" data-label="주 조명 세기" data-min="30" data-max="200"></div>
+      <div class="lslider" data-key="ambient" data-label="주변광 (전체를 고르게)" data-min="0" data-max="250"></div>
+      <div class="lslider" data-key="dirX" data-label="빛 방향 (왼쪽 ↔ 오른쪽)" data-min="-100" data-max="100"></div>
+      <div class="lslider" data-key="dirY" data-label="빛 높이 (정면 ↔ 위)" data-min="0" data-max="100"></div>
+      <p class="hint">빛 방향을 0 근처로 두면 정면에서 비춰 그림자가 거의 사라집니다.</p>
+    </section>
+
+    <div class="row">
+      <span class="spacer"></span>
+      <button id="reset">기본값으로</button>
+    </div>
+    <script src="lightwin.js"></script>
+  </body>
+</html>

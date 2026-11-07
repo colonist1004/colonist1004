@@ -627,6 +627,7 @@ function rebuildTrayMenu() {
           checked: s.toonShader !== false,
           click: (item) => setView({ toonShader: item.checked }),
         },
+        { label: '조명 설정 (얼굴·몸 밝기, 빛 방향)…', click: openLightWindow },
         { type: 'separator' },
         ...[0.25, 0.5, 0.75, 1].map((v) => ({
           label: `강도 ${Math.round(v * 100)}%`,
@@ -798,6 +799,53 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
 // Ctrl + mouse wheel over the character: resize by steps.
 ipcMain.on('resize-by', (_e, factor) => {
   if (Number.isFinite(factor) && factor > 0.5 && factor < 2) updatePlacement({ scale: settings.get().scale * factor });
+});
+
+// ---------------------------------------------------- 조명 설정 window
+
+const LIGHT_KEYS = { face: [0.4, 1.6], hair: [0.4, 1.6], body: [0.4, 2], shade: [0, 1], sun: [0.3, 2], ambient: [0, 2.5], dirX: [-1, 1], dirY: [0, 1] };
+const lightNow = () => ({ ...settings.DEFAULTS.light, ...(settings.get().light || {}) });
+let lightWin = null;
+function openLightWindow() {
+  if (lightWin) {
+    lightWin.show();
+    lightWin.focus();
+    return;
+  }
+  lightWin = new BrowserWindow({
+    width: 440,
+    height: 720,
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    title: '조명 설정 — Desktop Dancer',
+    autoHideMenuBar: true,
+    backgroundColor: '#f4f5f8',
+    webPreferences: {
+      preload: path.join(__dirname, 'lightwin-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  lightWin.loadFile(path.join(__dirname, 'lightwin', 'index.html'));
+  lightWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  lightWin.webContents.on('will-navigate', (e) => e.preventDefault());
+  lightWin.on('closed', () => (lightWin = null));
+}
+ipcMain.handle('light:get', () => ({ light: lightNow(), defaults: settings.DEFAULTS.light, toon: settings.get().toonShader !== false }));
+ipcMain.handle('light:set', (_e, patch) => {
+  const next = lightNow();
+  if (patch === 'reset') Object.assign(next, settings.DEFAULTS.light);
+  else if (patch && typeof patch === 'object') {
+    for (const [k, [lo, hi]] of Object.entries(LIGHT_KEYS)) {
+      const v = Number(patch[k]);
+      if (k in patch && Number.isFinite(v)) next[k] = Math.min(hi, Math.max(lo, v));
+    }
+  }
+  settings.update({ light: next });
+  win?.webContents.send('settings', settings.get());
+  return next;
 });
 
 // ---------------------------------------------------- 위치·크기 window
@@ -1019,7 +1067,7 @@ ipcMain.handle('char:check-image', async (e, file) => {
 // The look settings the preview shares with the dancer window
 ipcMain.handle('view:get-settings', () => {
   const s = settings.get();
-  return { toonShader: s.toonShader !== false, toonStrength: s.toonStrength ?? 1, toonHairShadow: s.toonHairShadow !== false };
+  return { toonShader: s.toonShader !== false, toonStrength: s.toonStrength ?? 1, toonHairShadow: s.toonHairShadow !== false, light: s.light };
 });
 
 // Picture -> 3D on this PC's graphics card (TripoSG / TripoSR)
@@ -1146,6 +1194,7 @@ if (!app.requestSingleInstanceLock()) {
 
   if (process.env.DANCER_SAVE_POSE) app.whenReady().then(() => setTimeout(savePoseNow, Number(process.env.DANCER_SAVE_POSE) || 3000));
   if (process.env.DANCER_OPEN_STUDIO) app.whenReady().then(() => setTimeout(() => openStudio(process.env.DANCER_OPEN_STUDIO === 'pose' ? 'pose' : 'dance'), 300));
+  if (process.env.DANCER_OPEN_LIGHT) app.whenReady().then(() => setTimeout(openLightWindow, 300));
   if (process.env.DANCER_OPEN_PLACE) app.whenReady().then(() => setTimeout(openPlaceWindow, 300));
   if (process.env.DANCER_OPEN_CHAR) app.whenReady().then(() => setTimeout(openCharStudio, 300));
 

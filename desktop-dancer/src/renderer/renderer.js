@@ -34,7 +34,7 @@ loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 let settings = { fps: 30, speed: 1 };
 const toon = new Toon(); // the Desktop Dancer toon look (patched MToon), see toon/toon.js
 let lastCustom = null; // the character's tweaks, re-applied when the toon look swaps materials
-const toonOptions = (s) => ({ enabled: s.toonShader !== false, strength: s.toonStrength ?? 1, hairShadow: s.toonHairShadow !== false });
+const toonOptions = (s) => ({ enabled: s.toonShader !== false, strength: s.toonStrength ?? 1, hairShadow: s.toonHairShadow !== false, light: s.light });
 let vrm = null;
 let mixer = null;
 let vrmAnimation = null;
@@ -500,6 +500,7 @@ api.onSettings((s) => {
   }
   toon.setStrength(t.strength);
   toon.hairShadow = t.hairShadow;
+  toon.setLight(t.light);
   settings = s;
   life.setOptions({ lookAt: s.lookAt !== false, reactions: s.reactions !== false });
   syncMusic();
@@ -615,6 +616,7 @@ window.addEventListener('unhandledrejection', (e) => api.reportError(e.reason?.s
 (async () => {
   const init = await api.getInitial();
   settings = init.settings;
+  toon.setLight(settings.light);
   toon.setLights(hemi, sun, settings.toonShader !== false);
   syncMusic();
   resize();
