@@ -164,7 +164,7 @@ function makeClip(name, frames, fps, poseFn) {
     const pose = poseFn(f / fps);
     hips.set(pose.hipsPosition, f * 3);
     for (const [bone, e] of Object.entries(pose.rotations)) {
-      (rot[bone] ||= new Float32Array(frames * 4)).set(eulerXYZ(...e), f * 4);
+      (rot[bone] ||= new Float32Array(frames * 4)).set(e.length === 4 ? e : eulerXYZ(...e), f * 4); // quaternion or Euler
     }
   }
 

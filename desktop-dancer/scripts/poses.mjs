@@ -2,6 +2,8 @@
 // local Euler rotations [x, y, z] relative to the T-pose (R = Rx * Ry * Rz), hips position in meters.
 // The left side is written once; the right side mirrors it (y and z flip sign).
 
+import { BUILT_POSES } from '../src/renderer/poses-data.js';
+
 const side = (left) => {
   const out = {};
   for (const [bone, [x, y, z]] of Object.entries(left)) {
@@ -48,4 +50,6 @@ export const POSES = {
       ...side({ UpperArm: [0.35, 0.2, -1.2], LowerArm: [0, -0.7, 0], UpperLeg: [-1.45, 0, 0.06], LowerLeg: [1.35, 0, 0], Foot: [0.2, 0, 0] }),
     },
   },
+  // made from limb directions (src/renderer/poses-data.js); rotations are quaternions
+  ...BUILT_POSES,
 };

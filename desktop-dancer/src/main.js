@@ -91,6 +91,12 @@ function boundsSettings(extra = {}) {
   return { ...s, floorY: perch.floorY, yOffset: 0, xCenter: (perch.centerX - wa.x) / wa.width };
 }
 
+// 앉는 자세 (keys of SIT_STYLES in src/renderer/poses-data.js)
+const SIT_STYLE_MENU = [
+  ['random', '그때그때 랜덤'], ['basic', '다리 흔들기'], ['crossLegs', '다리 꼬기'], ['crossArms', '팔짱 끼기'],
+  ['crossBoth', '다리 꼬고 팔짱'], ['leanBack', '뒤로 기대기'], ['lap', '무릎에 손'], ['chin', '턱 괴기'],
+];
+
 // ------------------------------------------------------------------ 창 위에 걸터앉기 (Windows)
 
 let perch = null; // { hwnd, floorY, centerX } (DIP) while sitting on another window
@@ -186,6 +192,7 @@ function placementState() {
     yOffset: Math.round(Math.min(yr.max, Math.max(yr.min, s.yOffset || 0))),
     yRange: yr,
     behindTaskbar: !!s.behindTaskbar,
+    sitOffset: Number(s.sitOffset) || 0,
     frameHeight: b.nominalHeight,
     workWidth: d.workArea.width,
     minScale: placement.MIN_SCALE,
@@ -201,6 +208,7 @@ function updatePlacement(patch) {
   const cur = settings.get();
   const next = {};
   if (typeof patch.behindTaskbar === 'boolean') next.behindTaskbar = patch.behindTaskbar;
+  if (Number.isFinite(patch.sitOffset)) next.sitOffset = Math.round(Math.max(-200, Math.min(200, patch.sitOffset)));
   const opts = { ...cur, ...next };
   // keep the current center when only the size changes (also converts the old xFraction setting)
   const centerNow = placement.centerPx(d, { ...cur, scale: placement.clampScale(cur.scale) });
@@ -211,6 +219,7 @@ function updatePlacement(patch) {
   const y = Number.isFinite(patch.yOffset) ? patch.yOffset : cur.yOffset || 0;
   next.yOffset = Math.round(Math.min(yr.max, Math.max(yr.min, y)));
   settings.update(next);
+  if ('sitOffset' in next) win?.webContents.send('settings', settings.get());
   placeWindow();
   rebuildTrayMenu();
   return placementState();
@@ -644,6 +653,19 @@ function rebuildTrayMenu() {
           checked: s.toonHairShadow !== false,
           click: (item) => setView({ toonHairShadow: item.checked }),
         },
+      ],
+    },
+    {
+      label: '앉는 자세',
+      submenu: [
+        ...SIT_STYLE_MENU.map(([key, label]) => ({
+          label,
+          type: 'radio',
+          checked: (s.sitStyle || 'random') === key,
+          click: () => setView({ sitStyle: key }),
+        })),
+        { type: 'separator' },
+        { label: '앉았을 때 높이 보정…', click: openPlaceWindow },
       ],
     },
     {

@@ -4,6 +4,7 @@
 // Everything here is an offset applied after the mixer each frame. Bones the clip does not drive are
 // put back before the next frame (Offsets), so nothing accumulates.
 import * as THREE from 'three';
+import { SIT_STYLES } from './poses-data.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = (x) => x * x * (3 - 2 * x);
@@ -83,7 +84,7 @@ export function thighRadius(vrm) {
   });
   if (d.length < 20) return 0.12;
   d.sort((x, y) => x - y);
-  return clamp(d[Math.floor(d.length * 0.75)], 0.05, 0.35);
+  return clamp(d[Math.floor(d.length * 0.6)], 0.05, 0.35);
 }
 
 export class Life {
@@ -103,11 +104,12 @@ export class Life {
     this.pat = { lastX: null, dir: 0, run: 0, flips: [], until: 0 };
     this.walk = { on: false, dir: 1, w: 0, yaw: 0, phase: 0 };
     this.grab = null; // Alt+drag: { part, target (world), w, releasing }
-    this.sit = { mode: null, w: 0, posed: false }; // mode: 'dance' (legs sit, the rest dances) | 'rest' | null
+    this.sit = { mode: null, w: 0, posed: false, style: 'basic', pick: 'random' }; // mode: 'dance' (legs sit, the rest dances) | 'rest' | null
     this.pins = new Map(); // part -> { part, target, w, releasing }: limbs left where they were put (Shift on release)
     this.drag = { on: false, w: 0, vx: 0, vy: 0, lastX: 0, lastY: 0, lastT: 0, ax: 0, swing: 0, swingV: 0 };
     this.expr = {};
     this.height = 1.6;
+    this.seatY = 0; // world y the seated thighs rest on (the renderer sets it: floor line + user offset)
     this.t = 0;
   }
 
@@ -230,7 +232,7 @@ export class Life {
     if (!Number.isFinite(low)) return;
     this.offsets.touch(hips);
     const sy = hips.parent ? hips.parent.getWorldScale(new THREE.Vector3()).y : 1;
-    hips.position.y += (-low / (sy || 1)) * w;
+    hips.position.y += ((this.seatY - low) / (sy || 1)) * w;
   }
 
   // ------------------------------------------------ Alt+drag a hand, a foot or the chest
@@ -289,7 +291,21 @@ export class Life {
 
   /** Sit on the taskbar's edge: 'dance' keeps dancing from the hips up, 'rest' sits still; null stands. */
   setSit(mode) {
-    this.sit.mode = mode || null;
+    const st = this.sit;
+    // a new sit picks its style (a random one each time with 'random')
+    if (mode && !st.mode && st.w < 0.05) {
+      const keys = Object.keys(SIT_STYLES);
+      st.style = SIT_STYLES[st.pick] ? st.pick : keys[Math.floor(Math.random() * keys.length)];
+    }
+    st.mode = mode || null;
+  }
+
+  /** Which sitting style: a key of SIT_STYLES, or 'random'. Applies from the next sit (now if seated). */
+  setSitStyle(pick) {
+    const st = this.sit;
+    if (pick === st.pick) return;
+    st.pick = pick || 'random';
+    if (SIT_STYLES[st.pick]) st.style = st.pick;
   }
 
   /** Seated (by setSit, or a still pose with the thighs forward): the lower legs hang below the floor. */
@@ -429,21 +445,23 @@ export class Life {
     const st = this.sit;
     st.w += ((st.mode && !wk.on ? 1 : 0) - st.w) * Math.min(1, dt * 2.2);
     const restW = st.mode === 'rest' ? st.w : 0;
+    const style = SIT_STYLES[st.style] || SIT_STYLES.basic;
     if (st.w > 0.01) {
       const w = smooth(clamp(st.w, 0, 1));
-      for (const [side, s] of [['left', 1], ['right', -1]]) {
-        toward(`${side}UpperLeg`, -1.45, 0, s * 0.06, w);
-        toward(`${side}LowerLeg`, 1.35, 0, 0, w);
-        toward(`${side}Foot`, 0.2, 0, 0, w);
-      }
+      // a style rotation, written for VRM 1.0 (x/z mirrored for 0.x like `toward`)
+      const towardQ = (b, q, ww) => {
+        const n = node(b);
+        if (!n || ww <= 0) return;
+        this.offsets.touch(n);
+        n.quaternion.slerp(_q2.set(this.axis * q[0], q[1], this.axis * q[2], q[3]), ww);
+      };
+      const LEG = /UpperLeg|LowerLeg|Foot$/;
+      for (const [b, q] of Object.entries(style.rotations)) if (LEG.test(b)) towardQ(b, q, w);
       if (restW > 0.01) {
+        // sitting still: arms, spine and head from the style too
         const r = smooth(clamp(restW, 0, 1));
-        for (const [side, s] of [['left', 1], ['right', -1]]) {
-          toward(`${side}UpperArm`, 0.35, s * 0.2, -s * 1.2, r); // hands resting on the thighs
-          toward(`${side}LowerArm`, 0, -s * 0.7, 0, r);
-        }
-        toward('spine', 0.12, 0, 0, r);
-        toward('chest', 0, 0, 0, r);
+        for (const [b, q] of Object.entries(style.rotations)) if (!LEG.test(b)) towardQ(b, q, r);
+        if (!style.rotations.chest) toward('chest', 0, 0, 0, r);
       }
       const hips = node('hips');
       if (hips && this.hipsRest) {
@@ -461,9 +479,14 @@ export class Life {
       const thighUp = ul ? _v.set(0, -1, 0).applyQuaternion(ul.quaternion).y : -1;
       const knee = ll ? 2 * Math.acos(Math.min(1, Math.abs(ll.quaternion.w))) : 0;
       const seated = thighUp > -0.55 && knee > 0.7 && hips && this.hipsRest && hips.position.y < this.hipsRest.y * 0.6;
+      // crossed legs do not swing: the thighs of a style without swing, or of a still pose, are not side by side
+      const ur = node('rightUpperLeg');
+      const parallel = !ul || !ur || _v.set(0, -1, 0).applyQuaternion(ul.quaternion).dot(_v2.set(0, -1, 0).applyQuaternion(ur.quaternion)) > 0.93;
       if (seated) {
         st.posed = st.w <= 0.3;
         if (st.posed) this._seat(1); // a still sitting pose, too
+      }
+      if (seated && parallel && (st.w <= 0.3 || style.swing)) {
         const amp = (0.22 + 0.08 * Math.sin(t * 0.31)) * (1 - d.w);
         for (const [side, s] of [['left', 1], ['right', -1]]) {
           // on the beat when there is music (one kick per beat, legs taking turns), lazily otherwise

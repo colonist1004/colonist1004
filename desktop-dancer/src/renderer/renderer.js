@@ -452,7 +452,11 @@ function tick() {
     } else idlePose(clock.elapsedTime);
     if (alive) {
       const now = performance.now() / 1000;
+      life.setSitStyle(settings.sitStyle || 'random');
       life.setSit(sitMode());
+      // seated thighs rest on the window's bottom edge (the floor line), moved by the user's 앉는 높이 보정 (px)
+      const upp = viewHeight / (frame?.nominalHeight || window.innerHeight);
+      life.seatY = -viewHeight * 0.01 - (Number(settings.sitOffset) || 0) * upp;
       life.update(delta, clock.elapsedTime, {
         camera, width: window.innerWidth, height: window.innerHeight,
         dancing: !!mixer && !holdingPose, still: holdingPose,

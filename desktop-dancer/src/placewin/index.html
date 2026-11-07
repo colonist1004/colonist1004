@@ -77,6 +77,22 @@
       <p class="hint">0 = 작업표시줄 위에 선 위치. 위로 올리면 +, 아래로 내리면 − (화면 아래로 들어가 상체만 보이게 할 수 있어요).</p>
     </section>
 
+    <section class="card">
+      <h2>앉았을 때 높이 보정</h2>
+      <div class="ctl">
+        <input id="sit" type="range" min="-200" max="200" step="1" />
+        <input id="sit-num" type="number" min="-200" max="200" step="1" class="num" /><span>px</span>
+      </div>
+      <div class="row nudges">
+        <button data-sit="-10">↑ 10</button>
+        <button data-sit="-1">↑ 1</button>
+        <button data-sit="1">↓ 1</button>
+        <button data-sit="10">↓ 10</button>
+        <button data-sitpos="0">자동 (0)</button>
+      </div>
+      <p class="hint">걸터앉았을 때 엉덩이가 떠 보이면 + (아래로), 파묻혀 보이면 − (위로). 작업표시줄·창 위에 앉을 때 모두 적용됩니다.</p>
+    </section>
+
     <div class="row">
       <span class="spacer"></span>
       <button id="reset">처음대로 (100%, 오른쪽 아래)</button>

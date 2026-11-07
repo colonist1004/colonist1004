@@ -21,6 +21,8 @@ function render(s) {
   if (document.activeElement !== $('y-num')) $('y-num').value = s.yOffset;
   $('crop-note').hidden = !s.cropped;
   $('behind').checked = !!s.behindTaskbar;
+  if (document.activeElement !== $('sit')) $('sit').value = s.sitOffset;
+  if (document.activeElement !== $('sit-num')) $('sit-num').value = s.sitOffset;
 }
 
 const set = async (patch) => render(await api.set(patch));
@@ -60,6 +62,13 @@ for (const b of document.querySelectorAll('[data-xpos]')) {
 }
 for (const b of document.querySelectorAll('[data-y]')) b.onclick = () => set({ yOffset: st.yOffset + Number(b.dataset.y) });
 for (const b of document.querySelectorAll('[data-ypos]')) b.onclick = () => set({ yOffset: Number(b.dataset.ypos) });
+$('sit').addEventListener('input', () => set({ sitOffset: Number($('sit').value) }));
+$('sit-num').addEventListener('change', () => {
+  $('sit-num').blur();
+  set({ sitOffset: Number($('sit-num').value) });
+});
+for (const b of document.querySelectorAll('[data-sit]')) b.onclick = () => set({ sitOffset: st.sitOffset + Number(b.dataset.sit) });
+for (const b of document.querySelectorAll('[data-sitpos]')) b.onclick = () => set({ sitOffset: Number(b.dataset.sitpos) });
 $('reset').onclick = async () => render(await api.reset());
 
 api.onChanged(render); // dragging the character, Ctrl+wheel, tray presets
