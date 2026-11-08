@@ -54,7 +54,7 @@ jobs:
       - name: Tests (window placement + sample character/dance)
         run: npm test
 
-      - name: Build portable exe and installer
+      - name: Build installer
         run: npm run dist
 
       - name: Upload

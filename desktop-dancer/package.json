@@ -8,7 +8,7 @@
     "start": "electron .",
     "gen:samples": "node scripts/make-samples.mjs",
     "predist": "node scripts/vendor.mjs",
-    "dist": "electron-builder --win portable nsis --publish never",
+    "dist": "electron-builder --win nsis --publish never",
     "test": "node scripts/test-placement.mjs && node scripts/check-toon.mjs && node scripts/test-wander.mjs && node scripts/test-perch.mjs && node scripts/test-beat.mjs && node scripts/check-assets.mjs && node scripts/check-poses.mjs"
   },
   "author": "desktop-dancer",
@@ -51,7 +51,6 @@
     ],
     "win": {
       "target": [
-        "portable",
         "nsis"
       ]
     },
@@ -59,9 +58,6 @@
       "oneClick": true,
       "perMachine": false,
       "artifactName": "DesktopDancer-${version}-setup.${ext}"
-    },
-    "portable": {
-      "artifactName": "DesktopDancer-${version}-portable.${ext}"
     }
   }
 }
