@@ -7,9 +7,8 @@ Windows 작업표시줄 위에서 3D 캐릭터(VRM)가 춤(VRMA)을 추는 데�
 ## 받기 (Windows)
 
 GitHub 저장소 **Actions → Build Desktop Dancer (Windows)** 에서 최근 실행을 엽니다.
-**Artifacts** 의 `desktop-dancer-windows` 를 내려받으면 아래 두 파일이 들어 있습니다.
+**Artifacts** 의 `desktop-dancer-windows` 를 내려받으면 설치 프로그램이 들어 있습니다.
 
-- `DesktopDancer-…-portable.exe` — 설치 없이 바로 실행
 - `DesktopDancer-…-setup.exe` — 설치 프로그램 (시작 메뉴 등록, 제거 가능)
 
 코드 서명이 없어 처음 실행할 때 SmartScreen 경고가 뜹니다. **추가 정보 → 실행**을 누르세요.

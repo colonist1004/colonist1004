@@ -100,7 +100,7 @@ This folder is separate from the photo editor at the repo root and has its own `
   and look at the PNG.
 - The renderer may only read files inside library folders. This is enforced in `read-asset`. Keep it that way.
 - Coordinates in main are Electron DIP. Do not multiply by scaleFactor.
-- The Windows build runs in `.github/workflows/desktop-dancer-windows.yml`, which produces portable and NSIS exe files.
+- The Windows build runs in `.github/workflows/desktop-dancer-windows.yml`, which produces the NSIS installer exe (no portable build).
 
 ## Milestones (spec F-1)
 1. ✅ C: sample VRM and sample motion play on the taskbar.
