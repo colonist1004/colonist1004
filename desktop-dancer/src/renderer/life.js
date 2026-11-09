@@ -125,6 +125,10 @@ export class Life {
     this.hipsRest = vrm.humanoid.getNormalizedBoneNode('hips')?.position.clone() || null;
     this.thighR = thighRadius(vrm);
     this.react = null;
+    // pulled limbs and sitting belong to the previous character
+    this.grab = null;
+    this.pins.clear();
+    Object.assign(this.sit, { mode: null, w: 0, posed: false });
   }
 
   detach() {
@@ -221,17 +225,19 @@ export class Life {
     if (!hips || legs.some(([u, l]) => !u || !l)) return;
     hips.updateWorldMatrix(true, true);
     let low = Infinity;
+    const a = _v, b = _v2;
     for (const [u, l] of legs) {
-      const a = u.getWorldPosition(new THREE.Vector3());
-      const b = l.getWorldPosition(new THREE.Vector3());
-      const r = this.thighR * a.distanceTo(b);
-      // lowest point of the thigh's middle part, a tube of radius r around the hip-knee line
-      const mid = a.clone().lerp(b, 0.4);
-      low = Math.min(low, mid.y - r * Math.sqrt(Math.max(0, 1 - ((b.y - a.y) / Math.max(a.distanceTo(b), 1e-6)) ** 2)));
+      u.getWorldPosition(a);
+      l.getWorldPosition(b);
+      const len = Math.max(a.distanceTo(b), 1e-6);
+      const r = this.thighR * len;
+      // lowest point of the thigh's middle part (40 % down), a tube of radius r around the hip-knee line
+      const midY = a.y + (b.y - a.y) * 0.4;
+      low = Math.min(low, midY - r * Math.sqrt(Math.max(0, 1 - ((b.y - a.y) / len) ** 2)));
     }
     if (!Number.isFinite(low)) return;
     this.offsets.touch(hips);
-    const sy = hips.parent ? hips.parent.getWorldScale(new THREE.Vector3()).y : 1;
+    const sy = hips.parent ? hips.parent.getWorldScale(_v).y : 1;
     hips.position.y += ((this.seatY - low) / (sy || 1)) * w;
   }
 
@@ -280,6 +286,11 @@ export class Life {
 
   /** Walking along the taskbar: dir +1 = to the right of the screen. */
   setWalk(on, dir = 1) {
+    // pinned limbs hold world points; the walk turns and moves the body away from them
+    if (on) {
+      this.releasePins();
+      this.grabEnd();
+    }
     this.walk.on = on;
     if (on) this.walk.dir = dir;
   }
@@ -455,12 +466,11 @@ export class Life {
         this.offsets.touch(n);
         n.quaternion.slerp(_q2.set(this.axis * q[0], q[1], this.axis * q[2], q[3]), ww);
       };
-      const LEG = /UpperLeg|LowerLeg|Foot$/;
-      for (const [b, q] of Object.entries(style.rotations)) if (LEG.test(b)) towardQ(b, q, w);
+      for (const [b, q] of style.legs) towardQ(b, q, w);
       if (restW > 0.01) {
         // sitting still: arms, spine and head from the style too
         const r = smooth(clamp(restW, 0, 1));
-        for (const [b, q] of Object.entries(style.rotations)) if (!LEG.test(b)) towardQ(b, q, r);
+        for (const [b, q] of style.upper) towardQ(b, q, r);
         if (!style.rotations.chest) toward('chest', 0, 0, 0, r);
       }
       const hips = node('hips');

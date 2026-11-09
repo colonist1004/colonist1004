@@ -214,7 +214,8 @@ function parseMessage(line) {
 function shouldHideFor(fg, displayBoundsPx) {
   if (!fg) return false;
   if (fg.quns === 3 || fg.quns === 4) return true; // QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE
-  if (fg.none || !fg.full) return false;
+  // a maximized window can cover the monitor too (auto-hide taskbar): that is not fullscreen
+  if (fg.none || !fg.full || fg.zoomed) return false;
   if (!displayBoundsPx) return true;
   // only when it is on the character's monitor (centers inside)
   const cx = fg.x + fg.width / 2, cy = fg.y + fg.height / 2;

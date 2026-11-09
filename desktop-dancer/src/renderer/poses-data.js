@@ -105,16 +105,26 @@ export const SIT_STYLES = {
   chin: { label: '턱 괴기', swing: false, ...buildPose({ hipsY: SIT_Y, euler: SIT_EULER('chin'), limbs: { ...legs.cross, ...arms.chin } }) },
 };
 
-/** Built-in still poses made from these pieces (written by scripts/make-samples.mjs). */
+// per style, the leg bones and the rest (life.js applies them separately every frame)
+const LEG = /UpperLeg|LowerLeg|Foot$/;
+for (const st of Object.values(SIT_STYLES)) {
+  const all = Object.entries(st.rotations);
+  st.legs = all.filter(([b]) => LEG.test(b));
+  st.upper = all.filter(([b]) => !LEG.test(b));
+}
+
+const still = ({ hipsY, rotations }) => ({ hipsY, rotations });
+
+/** Built-in still poses (written by scripts/make-samples.mjs); the sitting ones are the sitting styles. */
 export const BUILT_POSES = {
   '팔짱 끼기': buildPose({ euler: { head: [0.04, 0.12, 0.06], leftUpperLeg: [0, 0, 0.05], rightUpperLeg: [0, 0, -0.05] }, limbs: { ...arms.crossed } }),
   '손 모으기': buildPose({ euler: { head: [0.1, 0, 0.1], spine: [0.04, 0, 0], leftUpperLeg: [0, 0, -0.02], rightUpperLeg: [0, 0, 0.02] }, limbs: { ...arms.clasp } }),
-  '다리 꼬고 앉기': buildPose({ hipsY: SIT_Y, euler: SIT_EULER('crossLegs'), limbs: { ...legs.cross, ...arms.lap } }),
-  '팔짱 끼고 앉기': buildPose({ hipsY: SIT_Y, euler: SIT_EULER('crossArms'), limbs: { ...legs.hang, ...arms.crossed } }),
-  '다리 꼬고 팔짱 끼고 앉기': buildPose({ hipsY: SIT_Y, euler: SIT_EULER('crossBoth'), limbs: { ...legs.cross, ...arms.crossed } }),
-  '뒤로 기대 앉기': buildPose({ hipsY: SIT_Y, euler: SIT_EULER('leanBack'), limbs: { ...legs.hang, ...arms.back } }),
-  '무릎에 손 올리고 앉기': buildPose({ hipsY: SIT_Y, euler: SIT_EULER('lap'), limbs: { ...legs.together, ...arms.lap } }),
-  '턱 괴고 앉기': buildPose({ hipsY: SIT_Y, euler: SIT_EULER('chin'), limbs: { ...legs.cross, ...arms.chin } }),
+  '다리 꼬고 앉기': still(SIT_STYLES.crossLegs),
+  '팔짱 끼고 앉기': still(SIT_STYLES.crossArms),
+  '다리 꼬고 팔짱 끼고 앉기': still(SIT_STYLES.crossBoth),
+  '뒤로 기대 앉기': still(SIT_STYLES.leanBack),
+  '무릎에 손 올리고 앉기': still(SIT_STYLES.lap),
+  '턱 괴고 앉기': still(SIT_STYLES.chin),
 };
 function SIT_EULER(style) {
   return {

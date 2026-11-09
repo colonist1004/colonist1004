@@ -588,7 +588,8 @@ function sitMode() {
 // Seated, the hanging lower legs need the window to reach below the floor: tell main how far.
 let sentHang = 0;
 function reportSitting() {
-  const hips = vrm.humanoid.normalizedRestPose.hips?.position?.[1] || 0.9;
+  // rest hips height in world units (customize.js scales the VRM root)
+  const hips = (vrm.humanoid.normalizedRestPose.hips?.position?.[1] || 0.9) * vrm.scene.scale.y;
   const want = life.sitting ? Math.min(0.6, (hips * 0.75) / viewHeight) : 0;
   if (Math.abs(want - sentHang) > 0.01) api.setSitting?.((sentHang = want));
 }

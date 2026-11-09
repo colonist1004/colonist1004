@@ -43,6 +43,7 @@ const tests = {
     assert.equal(shouldHideFor({ hwnd: 1, x: 0, y: 0, width: 2560, height: 1440, full: true, quns: 2 }, b), true);
     assert.equal(shouldHideFor({ hwnd: 1, x: 2560, y: 0, width: 1920, height: 1080, full: true, quns: 2 }, b), false); // other monitor
     assert.equal(shouldHideFor({ hwnd: 1, x: 100, y: 100, width: 800, height: 600, full: false, quns: 2 }, b), false);
+    assert.equal(shouldHideFor({ hwnd: 1, x: -8, y: -8, width: 2576, height: 1456, zoomed: true, full: true, quns: 0 }, b), false); // maximized, auto-hide taskbar
     assert.equal(shouldHideFor({ none: true, quns: 3 }, b), true); // exclusive D3D fullscreen
     assert.equal(shouldHideFor({ none: true, quns: 0 }, b), false);
     assert.equal(shouldHideFor(null, b), false);

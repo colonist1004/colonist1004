@@ -919,8 +919,10 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
     dragStart = null;
     const a = placement.frameAnchor(d, settings.get());
     if (windowList) tryDrop(a);
-    else pendingDrop = a;
-    setTimeout(() => (pendingDrop = null), 1500);
+    else {
+      pendingDrop = a;
+      setTimeout(() => pendingDrop === a && (pendingDrop = null), 1500); // the list never came
+    }
     updatePerch();
     placeWin?.webContents.send('place:changed', placementState());
   }
@@ -933,7 +935,6 @@ ipcMain.on('resize-by', (_e, factor) => {
 
 // ---------------------------------------------------- 조명 설정 window
 
-const LIGHT_KEYS = { face: [0.4, 1.6], hair: [0.4, 1.6], body: [0.4, 2], shade: [0, 1], sun: [0.3, 2], ambient: [0, 2.5], dirX: [-1, 1], dirY: [0, 1] };
 const lightNow = () => ({ ...settings.DEFAULTS.light, ...(settings.get().light || {}) });
 let lightWin = null;
 function openLightWindow() {
@@ -968,7 +969,7 @@ ipcMain.handle('light:set', (_e, patch) => {
   const next = lightNow();
   if (patch === 'reset') Object.assign(next, settings.DEFAULTS.light);
   else if (patch && typeof patch === 'object') {
-    for (const [k, [lo, hi]] of Object.entries(LIGHT_KEYS)) {
+    for (const [k, [lo, hi]] of Object.entries(settings.LIGHT_RANGE)) {
       const v = Number(patch[k]);
       if (k in patch && Number.isFinite(v)) next[k] = Math.min(hi, Math.max(lo, v));
     }
@@ -1328,6 +1329,7 @@ if (!app.requestSingleInstanceLock()) {
   if (process.env.DANCER_OPEN_PLACE) app.whenReady().then(() => setTimeout(openPlaceWindow, 300));
   if (process.env.DANCER_OPEN_CHAR) app.whenReady().then(() => setTimeout(openCharStudio, 300));
 
+  app.on('will-quit', () => settings.flush()); // the last debounced change
   app.on('window-all-closed', () => {
     // Keep running in the tray.
   });

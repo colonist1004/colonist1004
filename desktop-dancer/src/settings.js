@@ -21,7 +21,7 @@ const DEFAULTS = {
   wander: true, // now and then walk along the taskbar to another spot
   restSit: true, // after a walk, now and then sit on the taskbar edge for 20-40 s
   // 조명 설정 (toon look): brightness per part, how light the shade side is, the light itself
-  light: { face: 1, hair: 1, body: 1, shade: 0.7, sun: 1, ambient: 1, dirX: 0.65, dirY: 0.6 },
+  light: { face: 1, hair: 1, body: 1, shade: 0.7, sun: 1, ambient: 1, dirX: 0.65, dirY: 0.6 }, // ranges: LIGHT_RANGE
   sitStyle: 'random', // how it sits when resting / on a window / dancing seated: a key of SIT_STYLES or random
   sitOffset: 0, // px: seated, the hips go this much lower (+) or higher (-) than the automatic seat
   gameMode: true, // hide while a fullscreen game or video is in front (Windows)
@@ -48,8 +48,18 @@ function get() {
   return data;
 }
 
+// Saving is debounced: sliders and drags update many times a second. flush() writes now (on quit).
+let saveTimer = null;
 function update(patch) {
   data = { ...data, ...patch };
+  if (!file) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, 250);
+}
+
+function flush() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
   if (!file) return;
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -59,4 +69,7 @@ function update(patch) {
   }
 }
 
-module.exports = { load, get, update, DEFAULTS };
+// 조명 설정 slider ranges (the renderer's toon.js has the same table for its own clamping)
+const LIGHT_RANGE = { face: [0.4, 1.6], hair: [0.4, 1.6], body: [0.4, 2], shade: [0, 1], sun: [0.3, 2], ambient: [0, 2.5], dirX: [-1, 1], dirY: [0, 1] };
+
+module.exports = { load, get, update, flush, DEFAULTS, LIGHT_RANGE };
