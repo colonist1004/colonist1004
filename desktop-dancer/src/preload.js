@@ -22,5 +22,6 @@ contextBridge.exposeInMainWorld('dancer', {
   setSitting: (hang) => ipcRenderer.send('sitting', hang),
   onRestSit: (cb) => ipcRenderer.on('rest-sit', (_e, sec) => cb(sec)),
   onPerch: (cb) => ipcRenderer.on('perch', (_e, on) => cb(!!on)),
+  onPaused: (cb) => ipcRenderer.on('paused', (_e, v) => cb(!!v)),
   setBusy: (busy) => ipcRenderer.send('busy', !!busy),
 });

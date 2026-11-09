@@ -430,8 +430,15 @@ function playbackSpeed(delta) {
   return timeScale * (1 - 0.85 * life.holdFactor);
 }
 
+let paused = false; // hidden (게임 모드 or 숨기기): draw nothing
+api.onPaused?.((v) => {
+  paused = v;
+  clock.getDelta(); // no time jump when it comes back
+});
+
 function tick() {
   requestAnimationFrame(tick);
+  if (paused) return;
   if (recordFrames && mixer) {
     if (recordIndex < 0) recordIndex = 0;
     return recordStep();
@@ -535,6 +542,7 @@ window.__dancer = () => ({
   expr: { ...life.expr },
   head: life.headPx(camera, window.innerWidth, window.innerHeight),
   hovering,
+  paused,
   grab: life.grab ? { part: life.grab.part, w: life.grab.w, releasing: life.grab.releasing } : null,
   pins: [...life.pins.keys()],
   sit: { mode: life.sit.mode, w: life.sit.w, sitting: life.sitting, hang: sentHang },

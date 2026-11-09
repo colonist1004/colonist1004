@@ -24,6 +24,7 @@ const DEFAULTS = {
   light: { face: 1, hair: 1, body: 1, shade: 0.7, sun: 1, ambient: 1, dirX: 0.65, dirY: 0.6 },
   sitStyle: 'random', // how it sits when resting / on a window / dancing seated: a key of SIT_STYLES or random
   sitOffset: 0, // px: seated, the hips go this much lower (+) or higher (-) than the automatic seat
+  gameMode: true, // hide while a fullscreen game or video is in front (Windows)
   perch: false, // Windows: sit on the top edge of the window in front
   sitDance: false, // dance sitting down: legs from the sitting pose, the rest from the dance
   toonShader: true, // Desktop Dancer toon look (cel shading, face/hair/skin effects, toon lighting)

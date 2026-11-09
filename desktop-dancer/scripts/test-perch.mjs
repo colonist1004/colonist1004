@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 
 const require = createRequire(import.meta.url);
-const { perchPlacement, parseLine } = require('../src/perch.js');
+const { perchPlacement, parseMessage, shouldHideFor, dropTarget } = require('../src/perch.js');
 const placement = require('../src/placement.js');
 const uhd = { bounds: { x: 0, y: 0, width: 2560, height: 1440 }, workArea: { x: 0, y: 0, width: 2560, height: 1392 } };
 const frame = placement.frameSize(1);
@@ -28,10 +28,39 @@ const tests = {
     assert.equal(perchPlacement(null, uhd, frame, 500), null);
   },
   'parses watcher lines'() {
-    assert.deepEqual(parseLine('123 10 20 300 400 0'), { hwnd: 123, x: 10, y: 20, width: 300, height: 400, zoomed: false });
-    assert.equal(parseLine('123 -8 -8 2576 1408 1').zoomed, true);
-    assert.equal(parseLine('none'), null);
-    assert.equal(parseLine('garbage here'), null);
+    assert.deepEqual(parseMessage('F 123 10 20 300 400 0 0 2').value, { hwnd: 123, x: 10, y: 20, width: 300, height: 400, zoomed: false, full: false, quns: 2 });
+    assert.equal(parseMessage('F 123 -8 -8 2576 1408 1 1 2').value.zoomed, true);
+    assert.deepEqual(parseMessage('F none 3').value, { none: true, quns: 3 });
+    assert.equal(parseMessage('T gone').value, null);
+    assert.equal(parseMessage('T 7 1 2 300 200 0').value.hwnd, 7);
+    assert.deepEqual(parseMessage('L 5 1 2 300 300').value, { hwnd: 5, x: 1, y: 2, width: 300, height: 300 });
+    assert.equal(parseMessage('L end').kind, 'Lend');
+    assert.equal(parseMessage('garbage here'), null);
+    assert.equal(parseMessage('F 1 2'), null);
+  },
+  'game mode: hides for fullscreen apps on its own monitor only'() {
+    const b = uhd.bounds;
+    assert.equal(shouldHideFor({ hwnd: 1, x: 0, y: 0, width: 2560, height: 1440, full: true, quns: 2 }, b), true);
+    assert.equal(shouldHideFor({ hwnd: 1, x: 2560, y: 0, width: 1920, height: 1080, full: true, quns: 2 }, b), false); // other monitor
+    assert.equal(shouldHideFor({ hwnd: 1, x: 100, y: 100, width: 800, height: 600, full: false, quns: 2 }, b), false);
+    assert.equal(shouldHideFor({ none: true, quns: 3 }, b), true); // exclusive D3D fullscreen
+    assert.equal(shouldHideFor({ none: true, quns: 0 }, b), false);
+    assert.equal(shouldHideFor(null, b), false);
+  },
+  'drop onto a window: the visible top edge near the feet'() {
+    const front = { hwnd: 1, x: 100, y: 300, width: 600, height: 400 };
+    const back = { hwnd: 2, x: 500, y: 500, width: 800, height: 400 };
+    const list = [front, back];
+    assert.equal(dropTarget(list, 400, 310)?.hwnd, 1);
+    assert.equal(dropTarget(list, 1000, 480)?.hwnd, 2);
+    assert.equal(dropTarget(list, 600, 500), null); // back's edge there is hidden behind the front window
+    assert.equal(dropTarget(list, 400, 200), null); // too far above
+    assert.equal(dropTarget(list, 50, 300), null); // beside it
+  },
+  'a window dropped on by hand may be high up, a chosen one may not'() {
+    const r = { x: 900, y: 60, width: 900, height: 700, zoomed: false };
+    assert.equal(perchPlacement(r, uhd, frame, 1000), null);
+    assert.ok(perchPlacement(r, uhd, frame, 1000, { manual: true }));
   },
   'perched bounds: the frame stands on the window, the seated legs reach below it'() {
     const b = placement.computeBounds(uhd, { scale: 1, xCenter: 0.5, floorY: 600 });

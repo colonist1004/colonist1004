@@ -99,42 +99,93 @@ const SIT_STYLE_MENU = [
 
 // ------------------------------------------------------------------ 창 위에 걸터앉기 (Windows)
 
-let perch = null; // { hwnd, floorY, centerX } (DIP) while sitting on another window
+let perch = null; // { hwnd, floorY, centerX, manual, offX } (DIP) while sitting on another window
 let perchSkip = null; // the window the character was dragged off: not again until another one is in front
 let foreground = null; // last report from the watcher
-let stopPerchWatcher = null;
+let watcher = null; // { stop, list, track }
+let gameHidden = false; // 게임 모드: hidden while a fullscreen game / video is in front
+let windowList = null; // DIP rects front to back, asked for when a drag starts
+let pendingDrop = null; // a drop waiting for that list
+
+const toDip = (r) => (r.dip ? r : { ...r, ...screen.screenToDipRect(null, { x: r.x, y: r.y, width: r.width, height: r.height }) });
+
+/** The window watcher runs on Windows all the time (game mode, sitting on windows). Tests fake it. */
+function setupWatcher() {
+  if (watcher) return;
+  const handlers = { onForeground, onTracked, onList };
+  if (process.env.DANCER_PERCH_FAKE || process.env.DANCER_WINDOWS_FAKE || process.env.DANCER_FULLSCREEN_FAKE) {
+    // dev/test: DANCER_PERCH_FAKE="x,y,w,h" (DIP) is the window in front; DANCER_WINDOWS_FAKE="x,y,w,h;..."
+    // the window list; DANCER_FULLSCREEN_FAKE="onMs,offMs" a fullscreen app coming and going
+    const rect = (str, i) => {
+      const [x, y, width, height] = str.split(',').map(Number);
+      return { hwnd: i + 1, x, y, width, height, zoomed: false, dip: true };
+    };
+    const list = (process.env.DANCER_WINDOWS_FAKE || '').split(';').filter(Boolean).map(rect);
+    const timers = [];
+    if (process.env.DANCER_PERCH_FAKE) timers.push(setTimeout(() => onForeground({ ...rect(process.env.DANCER_PERCH_FAKE, 0), full: false, quns: 0 }), 1500));
+    if (process.env.DANCER_FULLSCREEN_FAKE) {
+      const [on, off] = process.env.DANCER_FULLSCREEN_FAKE.split(',').map(Number);
+      const b = targetDisplay().bounds;
+      timers.push(setTimeout(() => onForeground({ hwnd: 99, ...b, zoomed: false, full: true, quns: 2, dip: true }), on));
+      if (off) timers.push(setTimeout(() => onForeground({ none: true, quns: 0 }), off));
+    }
+    let tracked = 0;
+    watcher = {
+      stop: () => timers.forEach(clearTimeout),
+      list: () => setTimeout(() => onList(list), 50),
+      track: (h) => {
+        tracked = h;
+        const w = list.find((r) => r.hwnd === h);
+        if (w) setTimeout(() => tracked === h && onTracked(w), 50);
+      },
+    };
+    return;
+  }
+  watcher = perchMod.startWatcher(process.pid, handlers);
+}
 
 function setupPerch() {
-  const on = settings.get().perch === true;
-  if (on && !stopPerchWatcher) {
-    if (process.env.DANCER_PERCH_FAKE) {
-      // dev/test: "x,y,w,h" (DIP) as if that window were in front
-      const [x, y, width, height] = process.env.DANCER_PERCH_FAKE.split(',').map(Number);
-      const t = setTimeout(() => onForeground({ hwnd: 1, x, y, width, height, zoomed: false, dip: true }), 1500);
-      stopPerchWatcher = () => clearTimeout(t);
-    } else stopPerchWatcher = perchMod.startWatcher(process.pid, onForeground);
-  } else if (!on && stopPerchWatcher) {
-    stopPerchWatcher();
-    stopPerchWatcher = null;
-    foreground = null;
-    updatePerch();
-  }
+  setupWatcher();
+  if (settings.get().perch !== true && perch && !perch.manual) updatePerch();
 }
 
 function onForeground(r) {
   foreground = r;
   if (perchSkip != null && r?.hwnd !== perchSkip) perchSkip = null;
+  updateGameMode();
   updatePerch();
 }
 
+// ---- 게임 모드
+function updateGameMode() {
+  const d = targetDisplay();
+  const fg = foreground && !foreground.none ? toDip(foreground) : foreground;
+  const hide = settings.get().gameMode !== false && perchMod.shouldHideFor(fg, d.bounds);
+  if (hide === gameHidden) return;
+  gameHidden = hide;
+  if (hide && walk) endWalk();
+  applyVisibility();
+  rebuildTrayMenu();
+}
+
+function applyVisibility() {
+  if (!win || win.isDestroyed()) return;
+  const show = settings.get().visible !== false && !gameHidden;
+  if (show && !win.isVisible()) win.showInactive();
+  else if (!show && win.isVisible()) win.hide();
+  win.webContents.send('paused', !show); // no drawing while hidden
+}
+
+// ---- sitting on the window in front (setting `perch`)
 function updatePerch() {
   if (!win || win.isDestroyed() || dragStart || placeWin) return;
+  if (perch?.manual) return; // dropped on a window: that one wins until it goes away
   const s = settings.get();
   const d = targetDisplay();
   let next = null;
   const r = foreground;
-  if (s.perch === true && s.visible !== false && r && r.hwnd !== perchSkip) {
-    const rect = r.dip ? r : screen.screenToDipRect(null, { x: r.x, y: r.y, width: r.width, height: r.height });
+  if (s.perch === true && s.visible !== false && r && !r.none && r.hwnd !== perchSkip) {
+    const rect = toDip(r);
     if (screen.getDisplayMatching(rect).id === d.id) {
       const scale = placement.clampScale(s.scale);
       const centerX = perch?.hwnd === r.hwnd ? perch.centerX : d.workArea.x + placement.centerPx(d, { ...s, scale });
@@ -142,13 +193,62 @@ function updatePerch() {
       if (next) next.hwnd = r.hwnd;
     }
   }
+  setPerch(next);
+}
+
+function setPerch(next) {
   const same = (a, b) => (!a && !b) || (a && b && a.hwnd === b.hwnd && a.floorY === b.floorY && a.centerX === b.centerX);
   if (same(next, perch)) return;
   const wasOn = !!perch;
   if (next && walk) endWalk();
   perch = next;
-  if (wasOn !== !!perch) win.webContents.send('perch', !!perch);
+  if (wasOn !== !!perch) win?.webContents.send('perch', !!perch);
   placeWindow();
+}
+
+// ---- dropped onto a window's top edge: sit there and follow that window
+function onList(list) {
+  windowList = list.map(toDip);
+  if (pendingDrop) {
+    const p = pendingDrop;
+    pendingDrop = null;
+    tryDrop(p);
+  }
+}
+
+function tryDrop({ centerX, bottom }) {
+  const t = perchMod.dropTarget(windowList || [], centerX, bottom);
+  if (!t) return;
+  const d = targetDisplay();
+  const scale = placement.clampScale(settings.get().scale);
+  const p = perchMod.perchPlacement({ ...t, zoomed: false }, d, placement.frameSize(scale), centerX, { manual: true });
+  if (!p) return;
+  // when that window goes away the character lands on the taskbar right below
+  settings.update({ yOffset: 0, xCenter: placement.xCenterFor(d, p.centerX, scale, settings.get()) });
+  setPerch({ ...p, hwnd: t.hwnd, manual: true, offX: p.centerX - t.x });
+  watcher?.track(t.hwnd);
+}
+
+function onTracked(r) {
+  if (!perch?.manual) return;
+  const d = targetDisplay();
+  const rect = r ? toDip(r) : null;
+  if (!rect || r.zoomed || screen.getDisplayMatching(rect).id !== d.id) {
+    // closed, minimized, maximized or moved to another screen: back to the taskbar
+    watcher?.track(0);
+    perch = { ...perch, manual: false };
+    setPerch(null);
+    return;
+  }
+  const scale = placement.clampScale(settings.get().scale);
+  const p = perchMod.perchPlacement({ ...rect, zoomed: false }, d, placement.frameSize(scale), rect.x + perch.offX, { manual: true });
+  if (!p) {
+    watcher?.track(0);
+    perch = { ...perch, manual: false };
+    setPerch(null);
+    return;
+  }
+  setPerch({ ...perch, ...p });
 }
 
 /** Dragged off a window: stay where it was dropped, as a normal (taskbar) position. */
@@ -161,6 +261,7 @@ function leavePerchForDrag() {
     yOffset: placement.yOffsetFor(d, perch.floorY, scale, settings.get()),
   });
   perchSkip = perch.hwnd;
+  if (perch.manual) watcher?.track(0);
   perch = null;
   win?.webContents.send('perch', false);
 }
@@ -313,7 +414,7 @@ function scheduleWander() {
 
 function startWalk() {
   const s = settings.get();
-  if (!win || win.isDestroyed() || !s.visible || dragStart || walk || rendererBusy || placeWin || perch || Date.now() < restUntil) return scheduleWander();
+  if (!win || win.isDestroyed() || !s.visible || dragStart || walk || rendererBusy || placeWin || perch || gameHidden || Date.now() < restUntil) return scheduleWander();
   const p = wander.plan(targetDisplay(), s);
   if (!p) return scheduleWander();
   walk = { ...p, x: p.from, started: false, last: 0 };
@@ -391,9 +492,7 @@ function allowSystemAudio() {
 
 function setVisible(v) {
   settings.update({ visible: v });
-  if (!win) return;
-  if (v) win.showInactive();
-  else win.hide();
+  applyVisibility();
   rebuildTrayMenu();
 }
 
@@ -535,6 +634,7 @@ function rebuildTrayMenu() {
   const displays = screen.getAllDisplays();
   const primaryId = screen.getPrimaryDisplay().id;
   const menu = Menu.buildFromTemplate([
+    ...(gameHidden ? [{ label: '게임·전체 화면 중이라 잠시 숨김', enabled: false }] : []),
     { label: s.visible ? '숨기기' : '보이기', click: () => setVisible(!s.visible) },
     { label: '춤 만들기 (영상에서)…', click: () => openStudio('dance') },
     { label: '포즈 만들기 (사진에서)…', click: () => openStudio('pose') },
@@ -678,6 +778,7 @@ function rebuildTrayMenu() {
         { label: '산책 뒤 가끔 걸터앉아 쉬기', key: 'restSit' },
         { label: '앉아서 춤추기 (상체만)', key: 'sitDance' },
         ...(process.platform === 'win32' || process.env.DANCER_PERCH_FAKE ? [{ label: '앞에 있는 창 위에 걸터앉기', key: 'perch' }] : []),
+        { label: '게임·전체 화면일 때 숨기기', key: 'gameMode' },
       ].map(({ label, key }) => ({
         label,
         type: 'checkbox',
@@ -686,6 +787,7 @@ function rebuildTrayMenu() {
           settings.update({ [key]: item.checked });
           win?.webContents.send('settings', settings.get());
           if (key === 'perch') setupPerch();
+          if (key === 'gameMode') updateGameMode();
           if (key === 'wander') {
             if (!item.checked && walk) endWalk();
             scheduleWander();
@@ -801,6 +903,8 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
   if (phase === 'start') {
     if (walk) endWalk();
     leavePerchForDrag();
+    windowList = null;
+    watcher?.list(); // for a drop onto a window's top edge
     dragStart = { mouseX: screenX, mouseY: screenY, ...placement.frameAnchor(d, settings.get()) };
   } else if (phase === 'move' && dragStart) {
     const scale = placement.clampScale(settings.get().scale);
@@ -813,6 +917,10 @@ ipcMain.on('drag', (_e, phase, screenX, screenY) => {
     win.webContents.send('frame', frameInfo(b));
   } else if (phase === 'end' && dragStart) {
     dragStart = null;
+    const a = placement.frameAnchor(d, settings.get());
+    if (windowList) tryDrop(a);
+    else pendingDrop = a;
+    setTimeout(() => (pendingDrop = null), 1500);
     updatePerch();
     placeWin?.webContents.send('place:changed', placementState());
   }
